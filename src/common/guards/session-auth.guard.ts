@@ -36,9 +36,7 @@ export class SessionAuthGuard implements CanActivate {
     const bearerToken = authorizationHeader?.startsWith('Bearer ')
       ? authorizationHeader.slice('Bearer '.length).trim()
       : undefined;
-    const rawToken = isDesktopRequest && bearerToken
-      ? bearerToken
-      : req.cookies?.[cookieName] as string | undefined;
+    const rawToken = bearerToken ?? req.cookies?.[cookieName] as string | undefined;
 
     if (!rawToken) {
       throw new UnauthorizedException('Authentication required');
@@ -93,7 +91,7 @@ export class SessionAuthGuard implements CanActivate {
       csrfTokenHash: session.csrfTokenHash,
       inactivityExpiresAt: refreshedInactivity,
       absoluteExpiresAt: session.absoluteExpiresAt,
-      client: isDesktopRequest && bearerToken ? 'desktop' : 'web',
+      client: bearerToken ? (isDesktopRequest ? 'desktop' : 'browser-token') : 'web',
     };
 
     return true;

@@ -44,7 +44,7 @@ export class CsrfGuard implements CanActivate {
       : headerToken;
     const csrfHeader = normalizedHeaderToken?.trim();
 
-    if (req.session.client === 'desktop') {
+    if (req.session.client !== 'web') {
       if (!csrfHeader) {
         throw new ForbiddenException('CSRF validation failed');
       }

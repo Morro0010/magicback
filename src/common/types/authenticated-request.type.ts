@@ -13,7 +13,7 @@ export type SessionContext = {
   csrfTokenHash: string;
   inactivityExpiresAt: Date;
   absoluteExpiresAt: Date;
-  client: 'web' | 'desktop';
+  client: 'web' | 'desktop' | 'browser-token';
 };
 
 export type AuthenticatedRequest = FastifyRequest & {

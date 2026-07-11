@@ -102,7 +102,12 @@ export class AuthController {
               csrfToken: result.csrfToken,
             },
           }
-        : {}),
+        : {
+            browserAuth: {
+              sessionToken: result.sessionToken,
+              csrfToken: result.csrfToken,
+            },
+          }),
     };
   }
 
