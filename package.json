@@ -22,7 +22,8 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
-    "db:demo:reset": "ts-node prisma/seed-demo-data.ts",
+    "db:demo:reset": "node dist/prisma/seed-demo-data.js",
+    "db:demo:reset:dev": "ts-node prisma/seed-demo-data.ts",
     "db:deploy": "prisma migrate deploy",
     "openapi:json": "ts-node src/openapi.ts"
   },
@@ -91,6 +92,6 @@
     "testEnvironment": "node"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node dist/prisma/seed.js"
   }
 }

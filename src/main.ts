@@ -9,6 +9,15 @@ import fastifyHelmet from '@fastify/helmet';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 
+function normalizeOrigin(origin: string) {
+  const trimmed = origin.trim();
+  if (trimmed === 'file://' || trimmed === 'null') {
+    return trimmed;
+  }
+
+  return trimmed.replace(/\/+$/, '');
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
@@ -24,7 +33,7 @@ async function bootstrap() {
   const frontendOrigin = configService.getOrThrow<string>('FRONTEND_ORIGIN');
   const frontendOrigins = frontendOrigin
     .split(',')
-    .map((origin) => origin.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
   const localDevelopmentOrigins = isProduction
     ? []
@@ -75,15 +84,21 @@ async function bootstrap() {
         return;
       }
 
+      const normalizedOrigin = normalizeOrigin(origin);
+
       if (
-        allowedOrigins.includes(origin) ||
-        (origin.startsWith('file://') && frontendOrigins.includes('file://')) ||
-        (origin === 'null' && (frontendOrigins.includes('file://') || frontendOrigins.includes('null')))
+        allowedOrigins.includes(normalizedOrigin) ||
+        (normalizedOrigin.startsWith('file://') && frontendOrigins.includes('file://')) ||
+        (normalizedOrigin === 'null' && (frontendOrigins.includes('file://') || frontendOrigins.includes('null')))
       ) {
         callback(null, true);
         return;
       }
 
+      app.getHttpAdapter().getInstance().log.warn(
+        { origin: normalizedOrigin, allowedOrigins },
+        'CORS origin rejected',
+      );
       callback(null, false);
     },
     credentials: true,
