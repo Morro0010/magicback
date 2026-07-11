@@ -1,0 +1,520 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CASHIER
+}
+
+enum ReservationStatus {
+  REQUESTED
+  HELD
+  CONFIRMED
+  PENDING_PAYMENT
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  TRANSFER
+  CASH
+  CARD
+  OTHER
+}
+
+enum NotificationType {
+  NEW_RESERVATION
+  RESERVATION_UPDATED
+  PAYMENT_PENDING
+  EVENT_UPCOMING
+  POS_SALE_CREATED
+  POS_TICKET_WHATSAPP
+  LOW_STOCK_ALERT
+  SPECIAL_EVENT_RESERVATION_CREATED
+  SPECIAL_EVENT_PAYMENT_CONFIRMED
+  SPECIAL_EVENT_LINK_WHATSAPP
+}
+
+enum HistoryActionType {
+  CREATED
+  UPDATED
+  CANCELLED
+  REASSIGNED
+  PAYMENT_RECORDED
+  STATUS_CHANGED
+  PUBLIC_UPDATED
+  PUBLIC_LINK_REGENERATED
+}
+
+enum ProductCategory {
+  BEBIDAS
+  BOTANAS
+  DULCES
+  CINE
+  OTROS
+}
+
+enum ProductUnit {
+  PIEZA
+  BOTELLA
+  BOLSA
+  LATA
+  PAQUETE
+}
+
+enum InventoryMovementType {
+  PURCHASE_IN
+  SALE_OUT
+  MANUAL_ADJUSTMENT_POSITIVE
+  MANUAL_ADJUSTMENT_NEGATIVE
+  ADMIN_FORCED_SALE
+}
+
+enum NotificationChannel {
+  INTERNAL
+  WHATSAPP
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum SpecialEventStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  CANCELLED
+}
+
+enum SpecialEventReservationStatus {
+  PENDING_PAYMENT
+  PAYMENT_CONFIRMED
+  CANCELLED
+}
+
+enum SpecialEventAttendeeType {
+  CHILD
+  ADULT
+}
+
+model User {
+  id                     String                 @id @default(cuid())
+  name                   String
+  email                  String                 @unique
+  passwordHash           String
+  role                   UserRole
+  isActive               Boolean                @default(true)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  createdReservations    Reservation[]          @relation("CreatedReservations")
+  updatedReservations    Reservation[]          @relation("UpdatedReservations")
+  reservationHistory     ReservationHistory[]
+  blockedSlots           BlockedSlot[]
+  sessions               Session[]
+  notificationsRead      NotificationRead[]
+  notificationDeliveries NotificationDelivery[] @relation("DeliveryTriggeredBy")
+  auditLogs              AuditLog[]
+  productsCreated        Product[]              @relation("ProductsCreated")
+  productsUpdated        Product[]              @relation("ProductsUpdated")
+  inventoryMovements     InventoryMovement[]
+  sales                  Sale[]
+  purchases              Purchase[]
+  capturedReviews        CustomerReview[]       @relation("CustomerReviewsCaptured")
+  specialEventsCreated   SpecialEvent[]         @relation("SpecialEventsCreated")
+  specialEventsUpdated   SpecialEvent[]         @relation("SpecialEventsUpdated")
+  specialEventPayments   SpecialEventReservation[] @relation("SpecialEventPaymentsConfirmed")
+  specialEventCancellations SpecialEventReservation[] @relation("SpecialEventReservationsCancelled")
+}
+
+model Reservation {
+  id                   String               @id @default(cuid())
+  publicTokenHash      String               @unique
+  publicTokenExpiresAt DateTime?
+  celebrantName        String
+  eventFormJson        Json?
+  eventDate            DateTime
+  startTime            String
+  endTime              String
+  attendeesCount       Int
+  packageId            String
+  package              Package              @relation(fields: [packageId], references: [id])
+  theme                String?
+  foodDetails          String?
+  notes                String?
+  status               ReservationStatus    @default(REQUESTED)
+  advanceAmount        Decimal              @default(0) @db.Decimal(10, 2)
+  advancePaymentMethod PaymentMethod?
+  pendingBalance       Decimal              @default(0) @db.Decimal(10, 2)
+  paymentDate          DateTime?
+  editableUntil        DateTime
+  createdByUserId      String
+  updatedByUserId      String?
+  createdByUser        User                 @relation("CreatedReservations", fields: [createdByUserId], references: [id])
+  updatedByUser        User?                @relation("UpdatedReservations", fields: [updatedByUserId], references: [id])
+  cancelledAt          DateTime?
+  histories            ReservationHistory[]
+  notifications        Notification[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([eventDate, startTime, endTime])
+  @@index([status])
+  @@index([editableUntil])
+}
+
+model Package {
+  id           String        @id @default(cuid())
+  name         String
+  description  String
+  price        Decimal       @db.Decimal(10, 2)
+  featuresJson Json
+  isActive     Boolean       @default(true)
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model ReservationHistory {
+  id            String            @id @default(cuid())
+  reservationId String
+  actorUserId   String?
+  actionType    HistoryActionType
+  fieldChanged  String?
+  oldValueJson  Json?
+  newValueJson  Json?
+  reservation   Reservation       @relation(fields: [reservationId], references: [id])
+  actor         User?             @relation(fields: [actorUserId], references: [id])
+  createdAt     DateTime          @default(now())
+
+  @@index([reservationId, createdAt])
+}
+
+model BlockedSlot {
+  id              String   @id @default(cuid())
+  date            DateTime
+  startTime       String
+  endTime         String
+  reason          String?
+  createdByUserId String
+  createdByUser   User     @relation(fields: [createdByUserId], references: [id])
+  specialEvent    SpecialEvent?
+  createdAt       DateTime @default(now())
+
+  @@index([date, startTime, endTime])
+}
+
+model Notification {
+  id                   String                 @id @default(cuid())
+  type                 NotificationType
+  title                String
+  message              String
+  relatedReservationId String?
+  relatedReservation   Reservation?           @relation(fields: [relatedReservationId], references: [id])
+  relatedSaleId        String?
+  relatedSale          Sale?                  @relation(fields: [relatedSaleId], references: [id])
+  relatedSpecialEventReservationId String?
+  relatedSpecialEventReservation   SpecialEventReservation? @relation(fields: [relatedSpecialEventReservationId], references: [id])
+  isRead               Boolean                @default(false)
+  reads                NotificationRead[]
+  deliveries           NotificationDelivery[]
+  createdAt            DateTime               @default(now())
+
+  @@index([isRead, createdAt])
+}
+
+model NotificationRead {
+  id             String       @id @default(cuid())
+  notificationId String
+  userId         String
+  readAt         DateTime     @default(now())
+  notification   Notification @relation(fields: [notificationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([notificationId, userId])
+}
+
+model Session {
+  id                  String   @id @default(cuid())
+  sessionTokenHash    String   @unique
+  csrfTokenHash       String
+  userId              String
+  isActive            Boolean  @default(true)
+  lastActivityAt      DateTime @default(now())
+  inactivityExpiresAt DateTime
+  absoluteExpiresAt   DateTime
+  userAgent           String?
+  ipAddress           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, isActive])
+  @@index([absoluteExpiresAt])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  eventType    String
+  actorUserId  String?
+  actor        User?    @relation(fields: [actorUserId], references: [id])
+  ipAddress    String?
+  userAgent    String?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  @@index([eventType, createdAt])
+}
+
+model CustomerReview {
+  id                            String   @id @default(cuid())
+  customerName                  String
+  cumplimientoHorarioServicio   Int
+  amabilidadDisponibilidadStaff Int
+  lugarLimpio                   Int
+  calidadProductosServicio      Int
+  instalacionAdecuadaFiestas    Int
+  comidaTiempoForma             Int
+  recomendariaMagicCity         Int
+  satisfaccionGeneral           Int
+  recommendations               String?
+  averageRating                 Decimal  @db.Decimal(3, 2)
+  metadataJson                  Json?
+  capturedByUserId              String
+  capturedByUser                User     @relation("CustomerReviewsCaptured", fields: [capturedByUserId], references: [id])
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([averageRating])
+  @@index([capturedByUserId])
+}
+
+model SpecialEvent {
+  id              String             @id @default(cuid())
+  name            String
+  description     String
+  eventDate       DateTime
+  startTime       String
+  endTime         String
+  childPrice      Decimal            @db.Decimal(10, 2)
+  adultPrice      Decimal            @db.Decimal(10, 2)
+  capacityMax     Int
+  imageUrl        String?
+  includesText    String
+  status          SpecialEventStatus @default(DRAFT)
+  blockedSlotId   String?            @unique
+  blockedSlot     BlockedSlot?       @relation(fields: [blockedSlotId], references: [id])
+  createdByUserId String
+  updatedByUserId String?
+  createdByUser   User               @relation("SpecialEventsCreated", fields: [createdByUserId], references: [id])
+  updatedByUser   User?              @relation("SpecialEventsUpdated", fields: [updatedByUserId], references: [id])
+  reservations    SpecialEventReservation[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([eventDate, status])
+  @@index([status])
+}
+
+model SpecialEventReservation {
+  id                    String                        @id @default(cuid())
+  specialEventId        String
+  folioNumber           Int                           @unique @default(autoincrement())
+  publicTokenHash       String                        @unique
+  holderName            String
+  holderPhone           String
+  holderEmail           String?
+  comments              String?
+  childCount            Int
+  adultCount            Int
+  totalAmount           Decimal                       @db.Decimal(10, 2)
+  status                SpecialEventReservationStatus @default(PENDING_PAYMENT)
+  paymentConfirmedAt    DateTime?
+  paymentConfirmedByUserId String?
+  cancelledAt           DateTime?
+  cancelledByUserId     String?
+  specialEvent          SpecialEvent                  @relation(fields: [specialEventId], references: [id])
+  paymentConfirmedByUser User?                        @relation("SpecialEventPaymentsConfirmed", fields: [paymentConfirmedByUserId], references: [id])
+  cancelledByUser       User?                         @relation("SpecialEventReservationsCancelled", fields: [cancelledByUserId], references: [id])
+  tickets               SpecialEventTicket[]
+  notifications         Notification[]
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+
+  @@index([specialEventId, status])
+  @@index([folioNumber])
+  @@index([holderName])
+  @@index([holderPhone])
+  @@index([createdAt])
+  @@index([paymentConfirmedAt])
+}
+
+model SpecialEventTicket {
+  id              String                   @id @default(cuid())
+  reservationId   String
+  code            String                   @unique
+  attendeeName    String
+  attendeeType    SpecialEventAttendeeType
+  price           Decimal                  @db.Decimal(10, 2)
+  reservation     SpecialEventReservation  @relation(fields: [reservationId], references: [id])
+  createdAt       DateTime                 @default(now())
+
+  @@index([reservationId])
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  name               String
+  sku                String?             @unique
+  category           ProductCategory
+  description        String?
+  salePrice          Decimal             @db.Decimal(10, 2)
+  costPrice          Decimal             @db.Decimal(10, 2)
+  stockCurrent       Int                 @default(0)
+  stockMin           Int?
+  isActive           Boolean             @default(true)
+  unit               ProductUnit
+  createdByUserId    String?
+  updatedByUserId    String?
+  createdByUser      User?               @relation("ProductsCreated", fields: [createdByUserId], references: [id])
+  updatedByUser      User?               @relation("ProductsUpdated", fields: [updatedByUserId], references: [id])
+  inventoryMovements InventoryMovement[]
+  saleItems          SaleItem[]
+  purchaseItems      PurchaseItem[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([name])
+  @@index([category])
+  @@index([isActive, stockCurrent])
+}
+
+model InventoryMovement {
+  id            String                @id @default(cuid())
+  productId     String
+  type          InventoryMovementType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  reason        String?
+  forcedByAdmin Boolean               @default(false)
+  actorUserId   String?
+  saleId        String?
+  purchaseId    String?
+  unitSalePrice Decimal?              @db.Decimal(10, 2)
+  unitCostPrice Decimal?              @db.Decimal(10, 2)
+  product       Product               @relation(fields: [productId], references: [id])
+  actor         User?                 @relation(fields: [actorUserId], references: [id])
+  sale          Sale?                 @relation(fields: [saleId], references: [id])
+  purchase      Purchase?             @relation(fields: [purchaseId], references: [id])
+  createdAt     DateTime              @default(now())
+
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
+}
+
+model Sale {
+  id                 String              @id @default(cuid())
+  folio              String              @unique
+  paymentMethod      PaymentMethod
+  subtotal           Decimal             @db.Decimal(10, 2)
+  total              Decimal             @db.Decimal(10, 2)
+  forcedByAdmin      Boolean             @default(false)
+  customerPhone      String?
+  notes              String?
+  createdByUserId    String
+  createdByUser      User                @relation(fields: [createdByUserId], references: [id])
+  items              SaleItem[]
+  inventoryMovements InventoryMovement[]
+  notifications      Notification[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([createdAt])
+  @@index([paymentMethod, createdAt])
+}
+
+model SaleItem {
+  id                  String          @id @default(cuid())
+  saleId              String
+  productId           String
+  productNameSnapshot String
+  skuSnapshot         String?
+  categorySnapshot    ProductCategory
+  unitSnapshot        ProductUnit
+  quantity            Int
+  unitSalePrice       Decimal         @db.Decimal(10, 2)
+  unitCostPrice       Decimal         @db.Decimal(10, 2)
+  subtotal            Decimal         @db.Decimal(10, 2)
+  forcedNegativeStock Boolean         @default(false)
+  sale                Sale            @relation(fields: [saleId], references: [id])
+  product             Product         @relation(fields: [productId], references: [id])
+  createdAt           DateTime        @default(now())
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Purchase {
+  id                 String              @id @default(cuid())
+  folio              String              @unique
+  supplierName       String
+  reference          String?
+  notes              String?
+  totalCost          Decimal             @db.Decimal(10, 2)
+  createdByUserId    String
+  createdByUser      User                @relation(fields: [createdByUserId], references: [id])
+  items              PurchaseItem[]
+  inventoryMovements InventoryMovement[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([createdAt])
+}
+
+model PurchaseItem {
+  id                  String      @id @default(cuid())
+  purchaseId          String
+  productId           String
+  productNameSnapshot String
+  unitSnapshot        ProductUnit
+  quantity            Int
+  unitCostPrice       Decimal     @db.Decimal(10, 2)
+  subtotal            Decimal     @db.Decimal(10, 2)
+  purchase            Purchase    @relation(fields: [purchaseId], references: [id])
+  product             Product     @relation(fields: [productId], references: [id])
+  createdAt           DateTime    @default(now())
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model NotificationDelivery {
+  id                String                     @id @default(cuid())
+  notificationId    String
+  channel           NotificationChannel
+  provider          String?
+  destination       String?
+  status            NotificationDeliveryStatus @default(PENDING)
+  errorMessage      String?
+  payloadJson       Json?
+  sentAt            DateTime?
+  attempts          Int                        @default(1)
+  triggeredByUserId String?
+  triggeredByUser   User?                      @relation("DeliveryTriggeredBy", fields: [triggeredByUserId], references: [id])
+  notification      Notification               @relation(fields: [notificationId], references: [id])
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  @@index([notificationId, channel, createdAt])
+  @@index([status, channel, createdAt])
+}

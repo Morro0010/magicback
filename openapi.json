@@ -1,0 +1,1068 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_getHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "UsersController_getUsers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "post": {
+        "operationId": "UsersController_createUser",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{id}": {
+      "patch": {
+        "operationId": "UsersController_updateUser",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "delete": {
+        "operationId": "UsersController_deactivateUser",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/users/{id}/password": {
+      "patch": {
+        "operationId": "UsersController_updateUserPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/products": {
+      "get": {
+        "operationId": "ProductsController_listProducts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      },
+      "post": {
+        "operationId": "ProductsController_createProduct",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/products/metadata/categories": {
+      "get": {
+        "operationId": "ProductsController_getCategories",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/products/metadata/units": {
+      "get": {
+        "operationId": "ProductsController_getUnits",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "operationId": "ProductsController_getProduct",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      },
+      "patch": {
+        "operationId": "ProductsController_updateProduct",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/products/{id}/active": {
+      "patch": {
+        "operationId": "ProductsController_setActive",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProductActiveDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "/inventory/movements": {
+      "get": {
+        "operationId": "InventoryController_listMovements",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Inventory"
+        ]
+      }
+    },
+    "/inventory/adjustments": {
+      "post": {
+        "operationId": "InventoryController_createAdjustment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdjustmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Inventory"
+        ]
+      }
+    },
+    "/sales": {
+      "get": {
+        "operationId": "SalesController_listSales",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Sales"
+        ]
+      },
+      "post": {
+        "operationId": "SalesController_createSale",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSaleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Sales"
+        ]
+      }
+    },
+    "/sales/{id}": {
+      "get": {
+        "operationId": "SalesController_getSale",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Sales"
+        ]
+      }
+    },
+    "/sales/{id}/send-whatsapp": {
+      "post": {
+        "operationId": "SalesController_sendTicketWhatsApp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendSaleWhatsAppDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Sales"
+        ]
+      }
+    },
+    "/notifications": {
+      "get": {
+        "operationId": "NotificationsController_getNotifications",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/{id}/read": {
+      "patch": {
+        "operationId": "NotificationsController_markRead",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationReadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/{id}/send-whatsapp": {
+      "post": {
+        "operationId": "NotificationsController_sendWhatsApp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendNotificationWhatsAppDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/purchases": {
+      "get": {
+        "operationId": "PurchasesController_listPurchases",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Purchases"
+        ]
+      },
+      "post": {
+        "operationId": "PurchasesController_createPurchase",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePurchaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Purchases"
+        ]
+      }
+    },
+    "/purchases/{id}": {
+      "get": {
+        "operationId": "PurchasesController_getPurchase",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Purchases"
+        ]
+      }
+    },
+    "/finance/dashboard": {
+      "get": {
+        "operationId": "FinanceController_getDashboard",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/finance/sales-history": {
+      "get": {
+        "operationId": "FinanceController_getSalesHistory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/finance/purchases-history": {
+      "get": {
+        "operationId": "FinanceController_getPurchasesHistory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Finance"
+        ]
+      }
+    },
+    "/packages/public": {
+      "get": {
+        "operationId": "PackagesController_getPublicPackages",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Packages"
+        ]
+      }
+    },
+    "/packages": {
+      "get": {
+        "operationId": "PackagesController_getAllPackages",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Packages"
+        ]
+      },
+      "post": {
+        "operationId": "PackagesController_createPackage",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePackageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Packages"
+        ]
+      }
+    },
+    "/packages/{id}": {
+      "patch": {
+        "operationId": "PackagesController_updatePackage",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePackageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Packages"
+        ]
+      }
+    },
+    "/reservations": {
+      "get": {
+        "operationId": "ReservationsController_listReservations",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      },
+      "post": {
+        "operationId": "ReservationsController_createReservation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReservationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}": {
+      "get": {
+        "operationId": "ReservationsController_getReservation",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      },
+      "patch": {
+        "operationId": "ReservationsController_updateReservation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReservationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}/cancel": {
+      "post": {
+        "operationId": "ReservationsController_cancelReservation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelReservationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}/reassign": {
+      "post": {
+        "operationId": "ReservationsController_reassignReservation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignReservationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}/payment": {
+      "post": {
+        "operationId": "ReservationsController_recordPayment",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}/history": {
+      "get": {
+        "operationId": "ReservationsController_getReservationHistory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/reservations/{id}/regenerate-link": {
+      "post": {
+        "operationId": "ReservationsController_regeneratePublicLink",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Reservations"
+        ]
+      }
+    },
+    "/payments/methods": {
+      "get": {
+        "operationId": "PaymentsController_getMethods",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/calendar": {
+      "get": {
+        "operationId": "CalendarController_getCalendar",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Calendar"
+        ]
+      }
+    },
+    "/blocked-slots": {
+      "get": {
+        "operationId": "BlockedSlotsController_listBlockedSlots",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "BlockedSlots"
+        ]
+      },
+      "post": {
+        "operationId": "BlockedSlotsController_createBlockedSlot",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBlockedSlotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "BlockedSlots"
+        ]
+      }
+    },
+    "/blocked-slots/{id}": {
+      "patch": {
+        "operationId": "BlockedSlotsController_updateBlockedSlot",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBlockedSlotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "BlockedSlots"
+        ]
+      },
+      "delete": {
+        "operationId": "BlockedSlotsController_deleteBlockedSlot",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "BlockedSlots"
+        ]
+      }
+    },
+    "/public/reservations/{token}": {
+      "get": {
+        "operationId": "PublicReservationsController_getByToken",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "PublicReservations"
+        ]
+      },
+      "patch": {
+        "operationId": "PublicReservationsController_updateByToken",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePublicReservationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "PublicReservations"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "MAGIC CITY API",
+    "description": "API demo funcional para manejo de eventos",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "mc_session"
+      }
+    },
+    "schemas": {
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateUserPasswordDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateProductDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateProductDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SetProductActiveDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateAdjustmentDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateSaleDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SendSaleWhatsAppDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "MarkNotificationReadDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "SendNotificationWhatsAppDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreatePurchaseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreatePackageDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdatePackageDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateReservationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateReservationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CancelReservationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReassignReservationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "RecordPaymentDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateBlockedSlotDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateBlockedSlotDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdatePublicReservationDto": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}
