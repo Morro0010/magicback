@@ -1,5 +1,9 @@
 import { ConflictException } from '@nestjs/common';
-import { SpecialEventAttendeeType, SpecialEventReservationStatus, SpecialEventStatus } from '@prisma/client';
+import {
+  SpecialEventAttendeeType,
+  SpecialEventReservationStatus,
+  SpecialEventStatus,
+} from '@prisma/client';
 import { SpecialEventsService } from './special-events.service';
 
 const decimal = (value: number) => ({
@@ -61,18 +65,20 @@ function makeReservation(event = makeEvent()) {
         id: 'ticket-1',
         reservationId: 'reservation-1',
         code: '0293-01',
-        attendeeName: 'Mateo Perez',
-        attendeeType: SpecialEventAttendeeType.CHILD,
-        price: decimal(250),
+        attendeeName: 'Ana Perez',
+        attendeeType: SpecialEventAttendeeType.ADULT,
+        isReservationHolder: true,
+        price: decimal(100),
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
       },
       {
         id: 'ticket-2',
         reservationId: 'reservation-1',
         code: '0293-02',
-        attendeeName: 'Ana Perez',
-        attendeeType: SpecialEventAttendeeType.ADULT,
-        price: decimal(100),
+        attendeeName: 'Mateo Perez',
+        attendeeType: SpecialEventAttendeeType.CHILD,
+        isReservationHolder: false,
+        price: decimal(250),
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
       },
     ],
@@ -112,15 +118,28 @@ describe('SpecialEventsService', () => {
     sendSpecialEventPaymentConfirmed: jest.fn(),
     resendSpecialEventReservationLink: jest.fn(),
   } as any;
+  const customersService = {
+    linkSpecialEventReservation: jest.fn(),
+  } as any;
 
-  const service = new SpecialEventsService(prisma, configService, messagingService);
+  const service = new SpecialEventsService(
+    prisma,
+    configService,
+    messagingService,
+    customersService,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.$transaction.mockImplementation(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx));
+    prisma.$transaction.mockImplementation(
+      async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    );
     tx.specialEvent.findUnique.mockResolvedValue(event);
     tx.specialEventTicket.count.mockResolvedValue(0);
-    tx.specialEventReservation.create.mockResolvedValue({ id: reservation.id, folioNumber: reservation.folioNumber });
+    tx.specialEventReservation.create.mockResolvedValue({
+      id: reservation.id,
+      folioNumber: reservation.folioNumber,
+    });
     tx.specialEventReservation.findUniqueOrThrow.mockResolvedValue(reservation);
   });
 
@@ -130,32 +149,44 @@ describe('SpecialEventsService', () => {
       holderPhone: ' 5512345678 ',
       attendees: [
         { name: 'Mateo Perez', type: SpecialEventAttendeeType.CHILD },
-        { name: 'Ana Perez', type: SpecialEventAttendeeType.ADULT },
       ],
     });
 
-    expect(result.folio).toBe('0293');
+    expect(result.folio).toBe('EVT-0293');
     expect(result.totalAmount).toBe(350);
-    expect(result.tickets.map((ticket) => ticket.code)).toEqual(['0293-01', '0293-02']);
+    expect(result.tickets.map((ticket) => ticket.code)).toEqual([
+      '0293-01',
+      '0293-02',
+    ]);
     expect(tx.specialEventTicket.createMany).toHaveBeenCalledWith({
       data: [
         {
           reservationId: reservation.id,
           code: '0293-01',
-          attendeeName: 'Mateo Perez',
-          attendeeType: SpecialEventAttendeeType.CHILD,
-          price: event.childPrice,
+          attendeeName: 'Ana Perez',
+          attendeeType: SpecialEventAttendeeType.ADULT,
+          isReservationHolder: true,
+          price: event.adultPrice,
         },
         {
           reservationId: reservation.id,
           code: '0293-02',
-          attendeeName: 'Ana Perez',
-          attendeeType: SpecialEventAttendeeType.ADULT,
-          price: event.adultPrice,
+          attendeeName: 'Mateo Perez',
+          attendeeType: SpecialEventAttendeeType.CHILD,
+          isReservationHolder: false,
+          price: event.childPrice,
         },
       ],
     });
-    expect(messagingService.sendSpecialEventReservationCreated).toHaveBeenCalled();
+    expect(
+      messagingService.sendSpecialEventReservationCreated,
+    ).toHaveBeenCalled();
+    expect(customersService.linkSpecialEventReservation).toHaveBeenCalledWith({
+      reservationId: reservation.id,
+      holderName: reservation.holderName,
+      holderPhone: reservation.holderPhone,
+      holderEmail: reservation.holderEmail,
+    });
     expect(result.publicLink).toContain('/special-reservation/');
   });
 
@@ -169,12 +200,13 @@ describe('SpecialEventsService', () => {
         holderPhone: '5512345678',
         attendees: [
           { name: 'Mateo Perez', type: SpecialEventAttendeeType.CHILD },
-          { name: 'Ana Perez', type: SpecialEventAttendeeType.ADULT },
         ],
       }),
     ).rejects.toThrow(ConflictException);
 
     expect(tx.specialEventReservation.create).not.toHaveBeenCalled();
-    expect(messagingService.sendSpecialEventReservationCreated).not.toHaveBeenCalled();
+    expect(
+      messagingService.sendSpecialEventReservationCreated,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { registerScannerBlocker } from './common/security/scanner-blocker';
 
 function normalizeOrigin(origin: string) {
   const trimmed = origin.trim();
@@ -25,8 +26,12 @@ async function bootstrap() {
       bodyLimit: 1_048_576,
       trustProxy: true,
       logger: true,
+      disableRequestLogging: true,
     }),
   );
+
+  const fastify = app.getHttpAdapter().getInstance();
+  registerScannerBlocker(fastify);
 
   const configService = app.get(ConfigService);
   const isProduction = configService.getOrThrow<string>('NODE_ENV') === 'production';
@@ -75,6 +80,11 @@ async function bootstrap() {
     frameguard: { action: 'deny' },
     referrerPolicy: { policy: 'no-referrer' },
     xContentTypeOptions: true,
+  });
+
+  fastify.addHook('onSend', (_request, reply, payload, done) => {
+    reply.removeHeader('x-powered-by');
+    done(null, payload);
   });
 
   app.enableCors({

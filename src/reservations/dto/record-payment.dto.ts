@@ -1,5 +1,12 @@
 import { PaymentMethod } from '@prisma/client';
-import { IsDateString, IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  Matches,
+  Min,
+} from 'class-validator';
 
 export class RecordPaymentDto {
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -11,5 +18,6 @@ export class RecordPaymentDto {
 
   @IsOptional()
   @IsDateString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
   paymentDate?: string;
 }

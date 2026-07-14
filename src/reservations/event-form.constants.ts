@@ -168,6 +168,7 @@ export type EventFormPayload = {
   // Legacy mirrors kept for existing reservations and older UI reads.
   responsibleName: string | null;
   celebrantAge: number | null;
+  celebrantBirthDate: string | null;
   phone: string | null;
   address: string | null;
   eventTheme: string | null;
@@ -197,10 +198,7 @@ export type EventFormPayload = {
 };
 
 type EventFormInput =
-  | EventFormDto
-  | Partial<EventFormPayload>
-  | null
-  | undefined;
+  EventFormDto | Partial<EventFormPayload> | null | undefined;
 
 export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
   const eventType = normalizeEventType(input);
@@ -323,6 +321,10 @@ export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
       internalNotes: input?.internalNotes?.trim() || null,
       responsibleName: input?.responsibleName?.trim() || null,
       celebrantAge: input?.celebrantAge ?? null,
+      celebrantBirthDate:
+        eventType === EventType.BIRTHDAY_PARTY
+          ? normalizeDateString(input?.celebrantBirthDate)
+          : null,
       phone: input?.phone?.trim() || null,
       address: input?.address?.trim() || null,
       eventTheme:
@@ -465,7 +467,20 @@ export function getEventFormValidationMessage(
     return 'Selecciona un rango de asistentes para calcular el precio.';
   }
 
+  if (form.eventType === EventType.BIRTHDAY_PARTY && !form.celebrantBirthDate) {
+    return 'Indica la fecha de nacimiento del festejado.';
+  }
+
   return null;
+}
+
+function normalizeDateString(value?: string | null): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
 }
 
 function calculateMagicEventPricing(

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,6 +24,12 @@ export class NotificationsController {
   @Roles(UserRole.ADMIN, UserRole.CASHIER)
   getNotifications(@Query() query: ListNotificationsQueryDto) {
     return this.notificationsService.listNotifications(query);
+  }
+
+  @Patch('read-all')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER)
+  markAllRead(@CurrentUser() user: { id: string }) {
+    return this.notificationsService.markAllAsRead(user.id);
   }
 
   @Patch(':id/read')

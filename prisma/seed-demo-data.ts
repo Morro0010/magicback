@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import {
+  BirthdayFollowUpStatus,
   HistoryActionType,
   InventoryMovementType,
   NotificationChannel,
@@ -18,7 +19,11 @@ import {
 } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { calculateEditableUntil } from '../src/common/utils/date.util';
-import { generateOpaqueToken, hashOpaqueToken } from '../src/common/utils/security.util';
+import { nextPrivateEventFolioNumber } from '../src/common/utils/public-folio.util';
+import {
+  generateOpaqueToken,
+  hashOpaqueToken,
+} from '../src/common/utils/security.util';
 import { normalizeEventForm } from '../src/reservations/event-form.constants';
 import {
   EventAreaType,
@@ -32,11 +37,73 @@ import {
 const prisma = new PrismaClient();
 type SeedEventFormInput = NonNullable<Parameters<typeof normalizeEventForm>[0]>;
 
+type DemoPublicLink = {
+  label: string;
+  path: string;
+};
+
+const demoPublicLinks: DemoPublicLink[] = [];
+
 function plusDays(days: number) {
   const now = new Date();
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12));
+  const base = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12),
+  );
   base.setUTCDate(base.getUTCDate() + days);
   return base;
+}
+
+function dateTimeDaysAgo(days: number, hour = 12) {
+  const value = plusDays(-days);
+  value.setUTCHours(hour, 0, 0, 0);
+  return value;
+}
+
+function parseDateOnly(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function birthDateForUpcomingBirthday(daysUntil: number, ageTurning: number) {
+  const birthday = plusDays(daysUntil);
+  const birthYear = birthday.getUTCFullYear() - ageTurning;
+  return [
+    String(birthYear).padStart(4, '0'),
+    String(birthday.getUTCMonth() + 1).padStart(2, '0'),
+    String(birthday.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function nextBirthdayYear(birthDate: Date) {
+  const today = plusDays(0);
+  const thisYearBirthday = new Date(
+    Date.UTC(
+      today.getUTCFullYear(),
+      birthDate.getUTCMonth(),
+      birthDate.getUTCDate(),
+      12,
+    ),
+  );
+  return thisYearBirthday < today
+    ? today.getUTCFullYear() + 1
+    : today.getUTCFullYear();
+}
+
+function normalizeCustomerPhone(phone: string) {
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 13 && digits.startsWith('521')) {
+    return digits.slice(3);
+  }
+  if (digits.length === 12 && digits.startsWith('52')) {
+    return digits.slice(2);
+  }
+  if (digits.length > 10 && digits.startsWith('52')) {
+    return digits.slice(-10);
+  }
+  return digits;
 }
 
 function money(value: number) {
@@ -48,10 +115,22 @@ async function ensureUser(input: {
   name: string;
   role: UserRole;
   password: string;
+  isActive?: boolean;
 }) {
-  const existing = await prisma.user.findUnique({ where: { email: input.email } });
+  const passwordHash = await argon2.hash(input.password);
+  const existing = await prisma.user.findUnique({
+    where: { email: input.email },
+  });
   if (existing) {
-    return existing;
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        name: input.name,
+        role: input.role,
+        passwordHash,
+        isActive: input.isActive ?? true,
+      },
+    });
   }
 
   return prisma.user.create({
@@ -59,7 +138,47 @@ async function ensureUser(input: {
       email: input.email,
       name: input.name,
       role: input.role,
-      passwordHash: await argon2.hash(input.password),
+      passwordHash,
+      isActive: input.isActive ?? true,
+    },
+  });
+}
+
+async function upsertDemoCustomer(input: {
+  name: string;
+  phone: string;
+  email?: string | null;
+  address?: string | null;
+  internalNotes?: string | null;
+}) {
+  const normalizedPhone = normalizeCustomerPhone(input.phone);
+  if (!normalizedPhone) {
+    throw new Error(`No se pudo normalizar el teléfono demo de ${input.name}`);
+  }
+
+  const existing = await prisma.customer.findUnique({
+    where: { normalizedPhone },
+  });
+  if (!existing) {
+    return prisma.customer.create({
+      data: {
+        name: input.name.trim(),
+        phone: input.phone.trim(),
+        normalizedPhone,
+        email: input.email?.trim() || null,
+        address: input.address?.trim() || null,
+        internalNotes: input.internalNotes?.trim() || null,
+      },
+    });
+  }
+
+  return prisma.customer.update({
+    where: { id: existing.id },
+    data: {
+      email: existing.email || input.email?.trim() || null,
+      address: existing.address || input.address?.trim() || null,
+      internalNotes:
+        existing.internalNotes || input.internalNotes?.trim() || null,
     },
   });
 }
@@ -70,7 +189,16 @@ async function clearOperationalData() {
   await prisma.notification.deleteMany();
   await prisma.specialEventTicket.deleteMany();
   await prisma.specialEventReservation.deleteMany();
+  await prisma.$executeRawUnsafe(
+    'ALTER SEQUENCE IF EXISTS "SpecialEventReservation_folioNumber_seq" RESTART WITH 1',
+  );
+  await prisma.$executeRawUnsafe(
+    'ALTER SEQUENCE IF EXISTS "Reservation_privateEventFolioNumber_seq" RESTART WITH 1',
+  );
   await prisma.specialEvent.deleteMany();
+  await prisma.birthdayFollowUp.deleteMany();
+  await prisma.celebrant.deleteMany();
+  await prisma.customer.deleteMany();
   await prisma.customerReview.deleteMany();
   await prisma.reservationHistory.deleteMany();
   await prisma.inventoryMovement.deleteMany();
@@ -91,7 +219,8 @@ async function createPackages() {
     prisma.package.create({
       data: {
         name: 'Básico',
-        description: 'Paquete base Magic City con renta de espacio, invitados, alimentos y decoración incluida.',
+        description:
+          'Paquete base Magic City con renta de espacio, invitados, alimentos y decoración incluida.',
         price: money(0),
         featuresJson: [
           'Agua fresca a elegir',
@@ -106,24 +235,45 @@ async function createPackages() {
     prisma.package.create({
       data: {
         name: 'Básico + spa',
-        description: 'Paquete básico con experiencia de spa. Precio final por definir.',
+        description:
+          'Paquete básico con experiencia de spa. Precio final por definir.',
         price: money(0),
-        featuresJson: ['Incluye básico', 'Experiencia de spa', 'Precio por definir'],
+        featuresJson: [
+          'Incluye básico',
+          'Experiencia de spa',
+          'Precio por definir',
+        ],
       },
     }),
     prisma.package.create({
       data: {
         name: 'Básico + decoración premium',
-        description: 'Paquete básico con mampara completa, arco de globos, leds y figura de personaje.',
+        description:
+          'Paquete básico con mampara completa, arco de globos, leds y figura de personaje.',
         price: money(0),
-        featuresJson: ['Incluye básico', 'Mampara completa', 'Arco de globos', 'Leds', 'Figura de personaje'],
+        featuresJson: [
+          'Incluye básico',
+          'Mampara completa',
+          'Arco de globos',
+          'Leds',
+          'Figura de personaje',
+        ],
       },
     }),
   ]);
 }
 
 async function createProducts(adminId: string) {
-  const products = [
+  const products: Array<{
+    name: string;
+    sku: string;
+    category: ProductCategory;
+    salePrice: number;
+    costPrice: number;
+    stockMin: number;
+    unit: ProductUnit;
+    isActive?: boolean;
+  }> = [
     {
       name: 'Agua natural 500ml',
       sku: 'DEMO-AGUA-500',
@@ -178,6 +328,25 @@ async function createProducts(adminId: string) {
       stockMin: 12,
       unit: ProductUnit.BOLSA,
     },
+    {
+      name: 'Refresco en lata',
+      sku: 'DEMO-REFRESCO-LATA',
+      category: ProductCategory.BEBIDAS,
+      salePrice: 26,
+      costPrice: 11,
+      stockMin: 16,
+      unit: ProductUnit.LATA,
+    },
+    {
+      name: 'Artículo temporal inactivo',
+      sku: 'DEMO-INACTIVO',
+      category: ProductCategory.OTROS,
+      salePrice: 45,
+      costPrice: 20,
+      stockMin: 5,
+      unit: ProductUnit.PIEZA,
+      isActive: false,
+    },
   ];
 
   return prisma.$transaction(
@@ -188,7 +357,7 @@ async function createProducts(adminId: string) {
           salePrice: money(product.salePrice),
           costPrice: money(product.costPrice),
           stockCurrent: 0,
-          isActive: true,
+          isActive: product.isActive ?? true,
           createdByUserId: adminId,
           updatedByUserId: adminId,
         },
@@ -202,8 +371,12 @@ async function createPurchase(input: {
   supplierName: string;
   createdByUserId: string;
   items: Array<{ productId: string; quantity: number; unitCostPrice: number }>;
+  createdAt?: Date;
 }) {
-  const totalCost = input.items.reduce((acc, item) => acc + item.quantity * item.unitCostPrice, 0);
+  const totalCost = input.items.reduce(
+    (acc, item) => acc + item.quantity * item.unitCostPrice,
+    0,
+  );
   const purchase = await prisma.purchase.create({
     data: {
       folio: input.folio,
@@ -212,11 +385,14 @@ async function createPurchase(input: {
       notes: 'Compra demo para pruebas de inventario.',
       totalCost: money(totalCost),
       createdByUserId: input.createdByUserId,
+      createdAt: input.createdAt,
     },
   });
 
   for (const item of input.items) {
-    const product = await prisma.product.findUniqueOrThrow({ where: { id: item.productId } });
+    const product = await prisma.product.findUniqueOrThrow({
+      where: { id: item.productId },
+    });
     const previousStock = product.stockCurrent;
     const newStock = previousStock + item.quantity;
 
@@ -229,6 +405,7 @@ async function createPurchase(input: {
         quantity: item.quantity,
         unitCostPrice: money(item.unitCostPrice),
         subtotal: money(item.quantity * item.unitCostPrice),
+        createdAt: input.createdAt,
       },
     });
 
@@ -251,6 +428,7 @@ async function createPurchase(input: {
         actorUserId: input.createdByUserId,
         purchaseId: purchase.id,
         unitCostPrice: money(item.unitCostPrice),
+        createdAt: input.createdAt,
       },
     });
   }
@@ -267,9 +445,12 @@ async function createSale(input: {
   notes?: string;
   forceNegativeStock?: boolean;
   sendWhatsAppTicket?: boolean;
+  createdAt?: Date;
 }) {
   const products = await Promise.all(
-    input.items.map((item) => prisma.product.findUniqueOrThrow({ where: { id: item.productId } })),
+    input.items.map((item) =>
+      prisma.product.findUniqueOrThrow({ where: { id: item.productId } }),
+    ),
   );
   const subtotal = input.items.reduce((acc, item, index) => {
     return acc + products[index].salePrice.toNumber() * item.quantity;
@@ -286,6 +467,7 @@ async function createSale(input: {
       customerPhone: input.customerPhone ?? null,
       notes: input.notes ?? null,
       createdByUserId: input.createdByUserId,
+      createdAt: input.createdAt,
     },
   });
 
@@ -308,6 +490,7 @@ async function createSale(input: {
         unitCostPrice: product.costPrice,
         subtotal: money(product.salePrice.toNumber() * item.quantity),
         forcedNegativeStock,
+        createdAt: input.createdAt,
       },
     });
 
@@ -331,6 +514,7 @@ async function createSale(input: {
         saleId: sale.id,
         unitSalePrice: product.salePrice,
         unitCostPrice: product.costPrice,
+        createdAt: input.createdAt,
       },
     });
   }
@@ -341,6 +525,7 @@ async function createSale(input: {
       title: `Venta ${sale.folio}`,
       message: `Venta demo por $${subtotal.toFixed(2)}`,
       relatedSaleId: sale.id,
+      createdAt: input.createdAt,
       deliveries: {
         create: {
           channel: NotificationChannel.INTERNAL,
@@ -349,6 +534,7 @@ async function createSale(input: {
           sentAt: new Date(),
           payloadJson: Prisma.JsonNull,
           triggeredByUserId: input.createdByUserId,
+          createdAt: input.createdAt,
         },
       },
     },
@@ -361,6 +547,7 @@ async function createSale(input: {
         title: `Ticket WhatsApp ${sale.folio}`,
         message: `Ticket demo preparado para ${input.customerPhone}`,
         relatedSaleId: sale.id,
+        createdAt: input.createdAt,
         deliveries: {
           create: {
             channel: NotificationChannel.WHATSAPP,
@@ -373,6 +560,7 @@ async function createSale(input: {
               folio: sale.folio,
             },
             triggeredByUserId: input.createdByUserId,
+            createdAt: input.createdAt,
           },
         },
       },
@@ -380,6 +568,53 @@ async function createSale(input: {
   }
 
   return sale;
+}
+
+async function createManualInventoryAdjustment(input: {
+  productId: string;
+  quantityDelta: number;
+  reason: string;
+  actorUserId: string;
+  forceNegativeStock?: boolean;
+  createdAt?: Date;
+}) {
+  const product = await prisma.product.findUniqueOrThrow({
+    where: { id: input.productId },
+  });
+  const nextStock = product.stockCurrent + input.quantityDelta;
+  const forcedByAdmin = nextStock < 0 && input.forceNegativeStock === true;
+
+  if (nextStock < 0 && !forcedByAdmin) {
+    throw new Error(
+      `El ajuste demo dejaría stock negativo sin autorización: ${product.name}`,
+    );
+  }
+
+  await prisma.$transaction([
+    prisma.product.update({
+      where: { id: product.id },
+      data: {
+        stockCurrent: nextStock,
+        updatedByUserId: input.actorUserId,
+      },
+    }),
+    prisma.inventoryMovement.create({
+      data: {
+        productId: product.id,
+        type:
+          input.quantityDelta > 0
+            ? InventoryMovementType.MANUAL_ADJUSTMENT_POSITIVE
+            : InventoryMovementType.MANUAL_ADJUSTMENT_NEGATIVE,
+        quantity: input.quantityDelta,
+        previousStock: product.stockCurrent,
+        newStock: nextStock,
+        reason: input.reason,
+        forcedByAdmin,
+        actorUserId: input.actorUserId,
+        createdAt: input.createdAt,
+      },
+    }),
+  ]);
 }
 
 async function createReservation(input: {
@@ -395,20 +630,33 @@ async function createReservation(input: {
   paymentMethod?: PaymentMethod;
   theme: string;
   eventForm: SeedEventFormInput;
+  followUpStatus?: BirthdayFollowUpStatus;
+  historyActions?: HistoryActionType[];
+  createdAt?: Date;
 }) {
-  const packageRecord = await prisma.package.findUniqueOrThrow({ where: { id: input.packageId } });
+  const packageRecord = await prisma.package.findUniqueOrThrow({
+    where: { id: input.packageId },
+  });
   const eventDate = plusDays(input.daysFromNow);
   const token = generateOpaqueToken(32);
   const eventForm = normalizeEventForm({
     ...input.eventForm,
     eventTheme: input.theme,
-    responsibleName: input.eventForm.responsibleName ?? `Responsable de ${input.celebrantName}`,
+    responsibleName:
+      input.eventForm.responsibleName ??
+      `Responsable de ${input.celebrantName}`,
   });
-  const estimatedTotal = eventForm.pricingBreakdown.estimatedTotal || packageRecord.price.toNumber();
+  const estimatedTotal =
+    eventForm.pricingBreakdown.estimatedTotal || packageRecord.price.toNumber();
   const pendingBalance = Math.max(estimatedTotal - input.advanceAmount, 0);
+  const privateEventFolioNumber =
+    eventForm.eventType === EventType.PRIVATE_EVENT
+      ? await nextPrivateEventFolioNumber(prisma)
+      : null;
 
   const reservation = await prisma.reservation.create({
     data: {
+      privateEventFolioNumber,
       publicTokenHash: hashOpaqueToken(token),
       publicTokenExpiresAt: plusDays(45),
       celebrantName: input.celebrantName,
@@ -427,32 +675,151 @@ async function createReservation(input: {
       advanceAmount: money(input.advanceAmount),
       advancePaymentMethod: input.paymentMethod ?? null,
       pendingBalance: money(pendingBalance),
-      paymentDate: input.advanceAmount > 0 ? new Date() : null,
+      paymentDate:
+        input.advanceAmount > 0 ? (input.createdAt ?? new Date()) : null,
       editableUntil: calculateEditableUntil(eventDate),
       createdByUserId: input.createdByUserId,
       updatedByUserId: input.createdByUserId,
-      cancelledAt: input.status === ReservationStatus.CANCELLED ? new Date() : null,
+      cancelledAt:
+        input.status === ReservationStatus.CANCELLED
+          ? (input.createdAt ?? new Date())
+          : null,
       eventFormJson: eventForm,
+      createdAt: input.createdAt,
     },
   });
 
+  const historyRows: Prisma.ReservationHistoryCreateManyInput[] = [
+    {
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType: HistoryActionType.CREATED,
+      newValueJson: { status: ReservationStatus.REQUESTED },
+      createdAt: input.createdAt,
+    },
+    {
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType: HistoryActionType.UPDATED,
+      fieldChanged: 'eventFormJson',
+      newValueJson: { source: 'demo-seed' },
+      createdAt: input.createdAt,
+    },
+  ];
+
+  if (input.advanceAmount > 0) {
+    historyRows.push({
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType: HistoryActionType.PAYMENT_RECORDED,
+      fieldChanged: 'advanceAmount',
+      oldValueJson: { amount: 0 },
+      newValueJson: {
+        amount: input.advanceAmount,
+        method: input.paymentMethod ?? null,
+      },
+      createdAt: input.createdAt,
+    });
+  }
+
+  if (input.status !== ReservationStatus.REQUESTED) {
+    historyRows.push({
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType: HistoryActionType.STATUS_CHANGED,
+      fieldChanged: 'status',
+      oldValueJson: { status: ReservationStatus.REQUESTED },
+      newValueJson: { status: input.status },
+      createdAt: input.createdAt,
+    });
+  }
+
+  if (input.status === ReservationStatus.CANCELLED) {
+    historyRows.push({
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType: HistoryActionType.CANCELLED,
+      fieldChanged: 'status',
+      oldValueJson: { status: ReservationStatus.REQUESTED },
+      newValueJson: {
+        status: ReservationStatus.CANCELLED,
+        reason: 'Cancelación demo',
+      },
+      createdAt: input.createdAt,
+    });
+  }
+
+  for (const actionType of input.historyActions ?? []) {
+    historyRows.push({
+      reservationId: reservation.id,
+      actorUserId: input.createdByUserId,
+      actionType,
+      fieldChanged:
+        actionType === HistoryActionType.REASSIGNED ? 'createdByUserId' : null,
+      newValueJson: { source: 'demo-seed', actionType },
+      createdAt: input.createdAt,
+    });
+  }
+
   await prisma.reservationHistory.createMany({
-    data: [
-      {
-        reservationId: reservation.id,
-        actorUserId: input.createdByUserId,
-        actionType: HistoryActionType.CREATED,
-        newValueJson: { status: input.status },
-      },
-      {
-        reservationId: reservation.id,
-        actorUserId: input.createdByUserId,
-        actionType: HistoryActionType.UPDATED,
-        fieldChanged: 'eventFormJson',
-        newValueJson: { source: 'demo-seed' },
-      },
-    ],
+    data: historyRows,
   });
+
+  let customerId: string | null = null;
+  let celebrantId: string | null = null;
+  if (eventForm.phone) {
+    const customer = await upsertDemoCustomer({
+      name: eventForm.responsibleName || input.celebrantName,
+      phone: eventForm.phone,
+      address: eventForm.address,
+    });
+    customerId = customer.id;
+
+    if (
+      eventForm.eventType === EventType.BIRTHDAY_PARTY &&
+      eventForm.celebrantBirthDate
+    ) {
+      const birthDate = parseDateOnly(eventForm.celebrantBirthDate);
+      const existingCelebrant = await prisma.celebrant.findFirst({
+        where: {
+          customerId: customer.id,
+          name: input.celebrantName,
+          birthDate,
+        },
+      });
+      const celebrant =
+        existingCelebrant ??
+        (await prisma.celebrant.create({
+          data: {
+            customerId: customer.id,
+            name: input.celebrantName,
+            birthDate,
+            sourceReservationId: reservation.id,
+          },
+        }));
+      celebrantId = celebrant.id;
+
+      if (input.followUpStatus) {
+        await prisma.birthdayFollowUp.create({
+          data: {
+            customerId: customer.id,
+            celebrantId: celebrant.id,
+            birthdayYear: nextBirthdayYear(birthDate),
+            status: input.followUpStatus,
+            notes: `Seguimiento ${input.followUpStatus.toLowerCase()} generado por demo reset.`,
+          },
+        });
+      }
+    }
+
+    await prisma.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        customerId,
+        primaryCelebrantId: celebrantId,
+      },
+    });
+  }
 
   await prisma.notification.create({
     data: {
@@ -467,6 +834,7 @@ async function createReservation(input: {
       message: `Evento demo ${input.startTime}-${input.endTime}`,
       relatedReservationId: reservation.id,
       isRead: input.status === ReservationStatus.COMPLETED,
+      createdAt: input.createdAt,
       deliveries: {
         create: {
           channel: NotificationChannel.INTERNAL,
@@ -475,12 +843,18 @@ async function createReservation(input: {
           sentAt: new Date(),
           payloadJson: Prisma.JsonNull,
           triggeredByUserId: input.createdByUserId,
+          createdAt: input.createdAt,
         },
       },
     },
   });
 
-  return reservation;
+  demoPublicLinks.push({
+    label: `Reservación ${input.celebrantName}`,
+    path: `/public/reservations/${token}`,
+  });
+
+  return { reservation, token, customerId, celebrantId };
 }
 
 function reviewAverage(values: Record<string, number>) {
@@ -489,12 +863,16 @@ function reviewAverage(values: Record<string, number>) {
   return total / ratings.length;
 }
 
-async function createCustomerReviews(input: { adminId: string; cashierId: string }) {
+async function createCustomerReviews(input: {
+  adminId: string;
+  cashierId: string;
+}) {
   const reviews = [
     {
       customerName: 'Ana Pérez Demo',
       capturedByUserId: input.cashierId,
-      recommendations: 'Todo estuvo muy bonito, solo mejorar el sonido al cantar las mañanitas.',
+      recommendations:
+        'Todo estuvo muy bonito, solo mejorar el sonido al cantar las mañanitas.',
       ratings: {
         cumplimientoHorarioServicio: 5,
         amabilidadDisponibilidadStaff: 5,
@@ -505,12 +883,18 @@ async function createCustomerReviews(input: { adminId: string; cashierId: string
         recomendariaMagicCity: 5,
         satisfaccionGeneral: 5,
       },
-      metadataJson: { captureSurface: 'review_tablet', seed: true, device: 'ipad_landscape' },
+      metadataJson: {
+        captureSurface: 'review_tablet',
+        seed: true,
+        device: 'ipad_landscape',
+      },
+      createdAt: dateTimeDaysAgo(1, 18),
     },
     {
       customerName: 'Roberto Gómez Demo',
       capturedByUserId: input.adminId,
-      recommendations: 'La comida llegó un poco tarde. La atención del equipo fue excelente.',
+      recommendations:
+        'La comida llegó un poco tarde. La atención del equipo fue excelente.',
       ratings: {
         cumplimientoHorarioServicio: 3,
         amabilidadDisponibilidadStaff: 5,
@@ -521,7 +905,12 @@ async function createCustomerReviews(input: { adminId: string; cashierId: string
         recomendariaMagicCity: 4,
         satisfaccionGeneral: 3,
       },
-      metadataJson: { captureSurface: 'review_tablet', seed: true, hasLowCategory: true },
+      metadataJson: {
+        captureSurface: 'review_tablet',
+        seed: true,
+        hasLowCategory: true,
+      },
+      createdAt: dateTimeDaysAgo(9, 16),
     },
     {
       customerName: 'Mariana López Demo',
@@ -538,6 +927,7 @@ async function createCustomerReviews(input: { adminId: string; cashierId: string
         satisfaccionGeneral: 4,
       },
       metadataJson: { captureSurface: 'review_tablet', seed: true },
+      createdAt: dateTimeDaysAgo(22, 11),
     },
   ];
 
@@ -550,6 +940,7 @@ async function createCustomerReviews(input: { adminId: string; cashierId: string
         averageRating: money(reviewAverage(review.ratings)),
         metadataJson: review.metadataJson,
         capturedByUserId: review.capturedByUserId,
+        createdAt: review.createdAt,
       },
     });
   }
@@ -568,12 +959,23 @@ async function createSpecialEventReservation(input: {
   status: SpecialEventReservationStatus;
   paymentConfirmedByUserId?: string;
   cancelledByUserId?: string;
-  attendees: Array<{ name: string; type: SpecialEventAttendeeType; price: number }>;
+  attendees: Array<{
+    name: string;
+    type: SpecialEventAttendeeType;
+    price: number;
+  }>;
 }) {
   const token = generateOpaqueToken(32);
-  const childCount = input.attendees.filter((attendee) => attendee.type === SpecialEventAttendeeType.CHILD).length;
-  const adultCount = input.attendees.filter((attendee) => attendee.type === SpecialEventAttendeeType.ADULT).length;
-  const totalAmount = input.attendees.reduce((sum, attendee) => sum + attendee.price, 0);
+  const childCount = input.attendees.filter(
+    (attendee) => attendee.type === SpecialEventAttendeeType.CHILD,
+  ).length;
+  const adultCount = input.attendees.filter(
+    (attendee) => attendee.type === SpecialEventAttendeeType.ADULT,
+  ).length;
+  const totalAmount = input.attendees.reduce(
+    (sum, attendee) => sum + attendee.price,
+    0,
+  );
 
   const reservation = await prisma.specialEventReservation.create({
     data: {
@@ -587,14 +989,22 @@ async function createSpecialEventReservation(input: {
       adultCount,
       totalAmount: money(totalAmount),
       status: input.status,
-      paymentConfirmedAt: input.status === SpecialEventReservationStatus.PAYMENT_CONFIRMED ? new Date() : null,
+      paymentConfirmedAt:
+        input.status === SpecialEventReservationStatus.PAYMENT_CONFIRMED
+          ? new Date()
+          : null,
       paymentConfirmedByUserId:
         input.status === SpecialEventReservationStatus.PAYMENT_CONFIRMED
-          ? input.paymentConfirmedByUserId ?? null
+          ? (input.paymentConfirmedByUserId ?? null)
           : null,
-      cancelledAt: input.status === SpecialEventReservationStatus.CANCELLED ? new Date() : null,
+      cancelledAt:
+        input.status === SpecialEventReservationStatus.CANCELLED
+          ? new Date()
+          : null,
       cancelledByUserId:
-        input.status === SpecialEventReservationStatus.CANCELLED ? input.cancelledByUserId ?? null : null,
+        input.status === SpecialEventReservationStatus.CANCELLED
+          ? (input.cancelledByUserId ?? null)
+          : null,
     },
   });
 
@@ -605,8 +1015,22 @@ async function createSpecialEventReservation(input: {
       code: `${folio}-${String(index + 1).padStart(2, '0')}`,
       attendeeName: attendee.name,
       attendeeType: attendee.type,
+      isReservationHolder:
+        attendee.type === SpecialEventAttendeeType.ADULT &&
+        attendee.name.trim().toLocaleLowerCase('es-MX') ===
+          input.holderName.trim().toLocaleLowerCase('es-MX'),
       price: money(attendee.price),
     })),
+  });
+
+  const customer = await upsertDemoCustomer({
+    name: input.holderName,
+    phone: input.holderPhone,
+    email: input.holderEmail,
+  });
+  await prisma.specialEventReservation.update({
+    where: { id: reservation.id },
+    data: { customerId: customer.id },
   });
 
   const notificationType =
@@ -632,7 +1056,8 @@ async function createSpecialEventReservation(input: {
             provider: 'internal',
             sentAt: new Date(),
             payloadJson: Prisma.JsonNull,
-            triggeredByUserId: input.paymentConfirmedByUserId ?? input.cancelledByUserId ?? null,
+            triggeredByUserId:
+              input.paymentConfirmedByUserId ?? input.cancelledByUserId ?? null,
           },
           {
             channel: NotificationChannel.WHATSAPP,
@@ -651,7 +1076,12 @@ async function createSpecialEventReservation(input: {
     },
   });
 
-  return reservation;
+  demoPublicLinks.push({
+    label: `Boletos ${folio} · ${input.holderName}`,
+    path: `/special-reservation/${token}`,
+  });
+
+  return { reservation, token, folio, customerId: customer.id };
 }
 
 async function createSpecialEvents(input: { adminId: string }) {
@@ -668,15 +1098,17 @@ async function createSpecialEvents(input: { adminId: string }) {
   const halloween = await prisma.specialEvent.create({
     data: {
       name: 'Halloween Magic City Demo',
-      description: 'Evento temático demo para probar venta de boletos, cupo y pagos manuales.',
+      description:
+        'Evento temático demo para probar venta de boletos, cupo y pagos manuales.',
       eventDate: halloweenDate,
       startTime: '17:00',
       endTime: '20:00',
       childPrice: money(280),
       adultPrice: money(150),
-      capacityMax: 80,
+      capacityMax: 10,
       imageUrl: 'https://example.com/demo-halloween-magic-city.jpg',
-      includesText: 'Juegos, actividad temática, música, dulces y convivencia familiar.',
+      includesText:
+        'Juegos, actividad temática, música, dulces y convivencia familiar.',
       status: SpecialEventStatus.PUBLISHED,
       blockedSlotId: halloweenBlock.id,
       createdByUserId: input.adminId,
@@ -686,15 +1118,32 @@ async function createSpecialEvents(input: { adminId: string }) {
 
   await createSpecialEventReservation({
     specialEventId: halloween.id,
-    holderName: 'Familia Ramírez Demo',
-    holderPhone: '5551112233',
+    holderName: 'Ana Ramírez Demo',
+    holderPhone: '5551234567',
     holderEmail: 'ramirez.demo@example.com',
     comments: 'Llegan con dos niños disfrazados.',
     status: SpecialEventReservationStatus.PENDING_PAYMENT,
     attendees: [
-      { name: 'Mateo Ramírez', type: SpecialEventAttendeeType.CHILD, price: 280 },
-      { name: 'Sofía Ramírez', type: SpecialEventAttendeeType.CHILD, price: 280 },
-      { name: 'Laura Ramírez', type: SpecialEventAttendeeType.ADULT, price: 150 },
+      {
+        name: 'Ana Ramírez Demo',
+        type: SpecialEventAttendeeType.ADULT,
+        price: 150,
+      },
+      {
+        name: 'Mateo Ramírez',
+        type: SpecialEventAttendeeType.CHILD,
+        price: 280,
+      },
+      {
+        name: 'Sofía Ramírez',
+        type: SpecialEventAttendeeType.CHILD,
+        price: 280,
+      },
+      {
+        name: 'Laura Ramírez',
+        type: SpecialEventAttendeeType.ADULT,
+        price: 150,
+      },
     ],
   });
   await createSpecialEventReservation({
@@ -705,9 +1154,26 @@ async function createSpecialEvents(input: { adminId: string }) {
     status: SpecialEventReservationStatus.PAYMENT_CONFIRMED,
     paymentConfirmedByUserId: input.adminId,
     attendees: [
-      { name: 'Camila Torres', type: SpecialEventAttendeeType.CHILD, price: 280 },
-      { name: 'Diego Torres', type: SpecialEventAttendeeType.CHILD, price: 280 },
-      { name: 'Paola Torres', type: SpecialEventAttendeeType.ADULT, price: 150 },
+      {
+        name: 'Familia Torres Demo',
+        type: SpecialEventAttendeeType.ADULT,
+        price: 150,
+      },
+      {
+        name: 'Camila Torres',
+        type: SpecialEventAttendeeType.CHILD,
+        price: 280,
+      },
+      {
+        name: 'Diego Torres',
+        type: SpecialEventAttendeeType.CHILD,
+        price: 280,
+      },
+      {
+        name: 'Paola Torres',
+        type: SpecialEventAttendeeType.ADULT,
+        price: 150,
+      },
       { name: 'Iván Torres', type: SpecialEventAttendeeType.ADULT, price: 150 },
     ],
   });
@@ -717,7 +1183,18 @@ async function createSpecialEvents(input: { adminId: string }) {
     holderPhone: '5559990000',
     status: SpecialEventReservationStatus.CANCELLED,
     cancelledByUserId: input.adminId,
-    attendees: [{ name: 'Invitado Cancelado', type: SpecialEventAttendeeType.CHILD, price: 280 }],
+    attendees: [
+      {
+        name: 'Reserva Cancelada Demo',
+        type: SpecialEventAttendeeType.ADULT,
+        price: 150,
+      },
+      {
+        name: 'Invitado Cancelado',
+        type: SpecialEventAttendeeType.CHILD,
+        price: 280,
+      },
+    ],
   });
 
   const posadaBlock = await prisma.blockedSlot.create({
@@ -732,7 +1209,8 @@ async function createSpecialEvents(input: { adminId: string }) {
   await prisma.specialEvent.create({
     data: {
       name: 'Posada Magic City Demo',
-      description: 'Evento publicado sin reservas todavía para probar cupo disponible completo.',
+      description:
+        'Evento publicado sin reservas todavía para probar cupo disponible completo.',
       eventDate: plusDays(42),
       startTime: '18:00',
       endTime: '21:00',
@@ -779,11 +1257,343 @@ async function createSpecialEvents(input: { adminId: string }) {
       updatedByUserId: input.adminId,
     },
   });
+  await prisma.specialEvent.create({
+    data: {
+      name: 'Evento Cancelado Demo',
+      description:
+        'Evento cancelado sin bloqueo activo para probar filtros y estados administrativos.',
+      eventDate: plusDays(70),
+      startTime: '16:00',
+      endTime: '19:00',
+      childPrice: money(275),
+      adultPrice: money(125),
+      capacityMax: 60,
+      includesText: 'Evento cancelado; no debe estar disponible públicamente.',
+      status: SpecialEventStatus.CANCELLED,
+      createdByUserId: input.adminId,
+      updatedByUserId: input.adminId,
+    },
+  });
+}
+
+async function createNotificationAndAuditScenarios(input: {
+  adminId: string;
+  cashierId: string;
+}) {
+  const reservation = await prisma.reservation.findFirstOrThrow({
+    where: { status: ReservationStatus.CONFIRMED },
+    orderBy: { createdAt: 'desc' },
+  });
+  const specialReservation =
+    await prisma.specialEventReservation.findFirstOrThrow({
+      where: { status: SpecialEventReservationStatus.PENDING_PAYMENT },
+      orderBy: { createdAt: 'desc' },
+    });
+
+  const readNotification = await prisma.notification.create({
+    data: {
+      type: NotificationType.RESERVATION_UPDATED,
+      title: 'Reservación actualizada demo',
+      message: 'Notificación leída para probar filtros y cambio de estado.',
+      relatedReservationId: reservation.id,
+      isRead: true,
+      deliveries: {
+        create: {
+          channel: NotificationChannel.INTERNAL,
+          status: NotificationDeliveryStatus.SENT,
+          provider: 'internal',
+          sentAt: new Date(),
+          payloadJson: Prisma.JsonNull,
+          triggeredByUserId: input.adminId,
+        },
+      },
+    },
+  });
+  await prisma.notificationRead.create({
+    data: {
+      notificationId: readNotification.id,
+      userId: input.adminId,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      type: NotificationType.EVENT_UPCOMING,
+      title: 'Evento próximo demo',
+      message: 'Recordatorio sin leer para probar prioridad cronológica.',
+      relatedReservationId: reservation.id,
+      deliveries: {
+        create: {
+          channel: NotificationChannel.INTERNAL,
+          status: NotificationDeliveryStatus.SENT,
+          provider: 'internal',
+          sentAt: new Date(),
+          payloadJson: Prisma.JsonNull,
+          triggeredByUserId: input.cashierId,
+        },
+      },
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      type: NotificationType.SPECIAL_EVENT_LINK_WHATSAPP,
+      title: 'Seguimiento WhatsApp demo',
+      message:
+        'Entregas pendiente y fallida para probar estados de mensajería.',
+      relatedSpecialEventReservationId: specialReservation.id,
+      deliveries: {
+        create: [
+          {
+            channel: NotificationChannel.WHATSAPP,
+            destination: '+525551234567',
+            status: NotificationDeliveryStatus.PENDING,
+            provider: 'mock',
+            payloadJson: { seed: true, mode: 'pending-demo' },
+            triggeredByUserId: input.adminId,
+          },
+          {
+            channel: NotificationChannel.WHATSAPP,
+            destination: '+525551234567',
+            status: NotificationDeliveryStatus.FAILED,
+            provider: 'mock',
+            errorMessage: 'Fallo simulado; no se envió ningún mensaje real.',
+            payloadJson: { seed: true, mode: 'failed-demo' },
+            attempts: 2,
+            triggeredByUserId: input.adminId,
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.auditLog.createMany({
+    data: [
+      {
+        eventType: 'DEMO_LOGIN_SUCCESS',
+        actorUserId: input.adminId,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Magic City demo reset',
+        metadataJson: { seed: true },
+      },
+      {
+        eventType: 'DEMO_POS_OPERATION',
+        actorUserId: input.cashierId,
+        ipAddress: '127.0.0.1',
+        userAgent: 'Magic City demo reset',
+        metadataJson: { seed: true },
+      },
+    ],
+  });
+}
+
+function assertEnumCoverage<T extends string>(
+  label: string,
+  actual: Iterable<T>,
+  expected: readonly T[],
+) {
+  const actualSet = new Set(actual);
+  const missing = expected.filter((value) => !actualSet.has(value));
+  if (missing.length) {
+    throw new Error(
+      `Cobertura demo incompleta en ${label}: faltan ${missing.join(', ')}`,
+    );
+  }
+}
+
+async function assertDemoCoverage() {
+  const [
+    products,
+    reservationStatuses,
+    specialEventStatuses,
+    specialReservationStatuses,
+    movementTypes,
+    salePaymentMethods,
+    notificationTypes,
+    deliveryStatuses,
+    historyActions,
+    birthdayStatuses,
+    reviewsCount,
+    blockedSlotsCount,
+    notificationReadsCount,
+    auditLogsCount,
+  ] = await Promise.all([
+    prisma.product.findMany({
+      select: { category: true, unit: true, isActive: true },
+    }),
+    prisma.reservation.groupBy({ by: ['status'] }),
+    prisma.specialEvent.groupBy({ by: ['status'] }),
+    prisma.specialEventReservation.groupBy({ by: ['status'] }),
+    prisma.inventoryMovement.groupBy({ by: ['type'] }),
+    prisma.sale.groupBy({ by: ['paymentMethod'] }),
+    prisma.notification.groupBy({ by: ['type'] }),
+    prisma.notificationDelivery.groupBy({ by: ['status'] }),
+    prisma.reservationHistory.groupBy({ by: ['actionType'] }),
+    prisma.birthdayFollowUp.groupBy({ by: ['status'] }),
+    prisma.customerReview.count(),
+    prisma.blockedSlot.count(),
+    prisma.notificationRead.count(),
+    prisma.auditLog.count(),
+  ]);
+
+  assertEnumCoverage(
+    'categorías de producto',
+    products.map((row) => row.category),
+    Object.values(ProductCategory),
+  );
+  assertEnumCoverage(
+    'unidades de producto',
+    products.map((row) => row.unit),
+    Object.values(ProductUnit),
+  );
+  assertEnumCoverage(
+    'estados de reservación',
+    reservationStatuses.map((row) => row.status),
+    Object.values(ReservationStatus),
+  );
+  assertEnumCoverage(
+    'estados de evento especial',
+    specialEventStatuses.map((row) => row.status),
+    Object.values(SpecialEventStatus),
+  );
+  assertEnumCoverage(
+    'estados de boletos',
+    specialReservationStatuses.map((row) => row.status),
+    Object.values(SpecialEventReservationStatus),
+  );
+  assertEnumCoverage(
+    'movimientos de inventario',
+    movementTypes.map((row) => row.type),
+    Object.values(InventoryMovementType),
+  );
+  assertEnumCoverage(
+    'métodos de pago POS',
+    salePaymentMethods.map((row) => row.paymentMethod),
+    Object.values(PaymentMethod),
+  );
+  assertEnumCoverage(
+    'tipos de notificación',
+    notificationTypes.map((row) => row.type),
+    Object.values(NotificationType),
+  );
+  assertEnumCoverage(
+    'estados de entrega',
+    deliveryStatuses.map((row) => row.status),
+    Object.values(NotificationDeliveryStatus),
+  );
+  assertEnumCoverage(
+    'historial de reservaciones',
+    historyActions.map((row) => row.actionType),
+    Object.values(HistoryActionType),
+  );
+  assertEnumCoverage(
+    'seguimiento de cumpleaños',
+    birthdayStatuses.map((row) => row.status),
+    Object.values(BirthdayFollowUpStatus),
+  );
+
+  if (
+    !products.some((product) => product.isActive) ||
+    !products.some((product) => !product.isActive)
+  ) {
+    throw new Error('El demo debe incluir productos activos e inactivos.');
+  }
+  if (
+    reviewsCount < 3 ||
+    blockedSlotsCount < 4 ||
+    notificationReadsCount < 1 ||
+    auditLogsCount < 2
+  ) {
+    throw new Error(
+      'Faltan datos demo de reseñas, bloqueos, lecturas o auditoría.',
+    );
+  }
+
+  const [admin, cashier, inactiveCashier] = await Promise.all([
+    prisma.user.findUniqueOrThrow({
+      where: { email: 'admin@magiccity.local' },
+    }),
+    prisma.user.findUniqueOrThrow({
+      where: { email: 'cashier1@magiccity.local' },
+    }),
+    prisma.user.findUniqueOrThrow({
+      where: { email: 'cashier.inactive@magiccity.local' },
+    }),
+  ]);
+  const validPasswords = await Promise.all([
+    argon2.verify(admin.passwordHash, 'Admin123!'),
+    argon2.verify(cashier.passwordHash, 'Cashier123!'),
+    argon2.verify(inactiveCashier.passwordHash, 'Inactive123!'),
+  ]);
+  if (validPasswords.some((isValid) => !isValid) || inactiveCashier.isActive) {
+    throw new Error(
+      'Las credenciales demo o el escenario de usuario inactivo no quedaron consistentes.',
+    );
+  }
+
+  const reservations = await prisma.reservation.findMany({
+    select: { customerId: true, primaryCelebrantId: true, eventFormJson: true },
+  });
+  const eventTypes = reservations.flatMap((reservation) => {
+    if (
+      !reservation.eventFormJson ||
+      typeof reservation.eventFormJson !== 'object'
+    ) {
+      return [];
+    }
+    const value = reservation.eventFormJson as { eventType?: unknown };
+    return typeof value.eventType === 'string' ? [value.eventType] : [];
+  });
+  assertEnumCoverage('tipos de evento', eventTypes, Object.values(EventType));
+
+  if (reservations.some((reservation) => !reservation.customerId)) {
+    throw new Error(
+      'Todas las reservaciones demo con contacto deben estar vinculadas a Cliente.',
+    );
+  }
+
+  const consolidatedFamily = await prisma.customer.findUnique({
+    where: { normalizedPhone: '5551234567' },
+    include: {
+      celebrants: true,
+      reservations: true,
+      specialEventReservations: true,
+    },
+  });
+  if (
+    !consolidatedFamily ||
+    consolidatedFamily.celebrants.length < 2 ||
+    consolidatedFamily.reservations.length < 2 ||
+    consolidatedFamily.specialEventReservations.length < 1
+  ) {
+    throw new Error(
+      'No se creó el caso demo de familia consolidada con varios festejados y boletos.',
+    );
+  }
+
+  const mixedCineSale = await prisma.sale.findFirst({
+    where: {
+      items: { some: { categorySnapshot: ProductCategory.CINE } },
+      AND: {
+        items: { some: { categorySnapshot: { not: ProductCategory.CINE } } },
+      },
+    },
+  });
+  if (!mixedCineSale) {
+    throw new Error(
+      'Falta una venta mixta operación + CINE para probar finanzas.',
+    );
+  }
 }
 
 async function main() {
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_DB_RESET !== 'true') {
-    throw new Error('Refusing to reset demo data in production without ALLOW_DEMO_DB_RESET=true');
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.ALLOW_DEMO_DB_RESET !== 'true'
+  ) {
+    throw new Error(
+      'Refusing to reset demo data in production without ALLOW_DEMO_DB_RESET=true',
+    );
   }
 
   const admin = await ensureUser({
@@ -798,6 +1608,13 @@ async function main() {
     role: UserRole.CASHIER,
     password: 'Cashier123!',
   });
+  await ensureUser({
+    email: 'cashier.inactive@magiccity.local',
+    name: 'Cajero Inactivo Demo',
+    role: UserRole.CASHIER,
+    password: 'Inactive123!',
+    isActive: false,
+  });
 
   await clearOperationalData();
 
@@ -809,20 +1626,58 @@ async function main() {
     folio: 'CMP-DEMO-001',
     supplierName: 'Dulcería Demo',
     createdByUserId: admin.id,
+    createdAt: dateTimeDaysAgo(20, 10),
     items: [
-      { productId: bySku.get('DEMO-AGUA-500')!.id, quantity: 80, unitCostPrice: 8 },
-      { productId: bySku.get('DEMO-JUGO-INF')!.id, quantity: 60, unitCostPrice: 10 },
-      { productId: bySku.get('DEMO-DULCES')!.id, quantity: 90, unitCostPrice: 12 },
+      {
+        productId: bySku.get('DEMO-AGUA-500')!.id,
+        quantity: 80,
+        unitCostPrice: 8,
+      },
+      {
+        productId: bySku.get('DEMO-JUGO-INF')!.id,
+        quantity: 60,
+        unitCostPrice: 10,
+      },
+      {
+        productId: bySku.get('DEMO-DULCES')!.id,
+        quantity: 90,
+        unitCostPrice: 12,
+      },
     ],
   });
   await createPurchase({
     folio: 'CMP-DEMO-002',
     supplierName: 'Cine Snack Demo',
     createdByUserId: admin.id,
+    createdAt: dateTimeDaysAgo(3, 14),
     items: [
-      { productId: bySku.get('DEMO-PAL-CH')!.id, quantity: 45, unitCostPrice: 13 },
-      { productId: bySku.get('DEMO-CINE-COMBO')!.id, quantity: 30, unitCostPrice: 32 },
-      { productId: bySku.get('DEMO-PAPAS')!.id, quantity: 35, unitCostPrice: 14 },
+      {
+        productId: bySku.get('DEMO-PAL-CH')!.id,
+        quantity: 45,
+        unitCostPrice: 13,
+      },
+      {
+        productId: bySku.get('DEMO-CINE-COMBO')!.id,
+        quantity: 30,
+        unitCostPrice: 32,
+      },
+      {
+        productId: bySku.get('DEMO-PAPAS')!.id,
+        quantity: 35,
+        unitCostPrice: 14,
+      },
+    ],
+  });
+  await createPurchase({
+    folio: 'CMP-DEMO-003',
+    supplierName: 'Bebidas Demo',
+    createdByUserId: cashier.id,
+    items: [
+      {
+        productId: bySku.get('DEMO-REFRESCO-LATA')!.id,
+        quantity: 48,
+        unitCostPrice: 11,
+      },
     ],
   });
 
@@ -844,27 +1699,46 @@ async function main() {
     paymentMethod: PaymentMethod.CARD,
     customerPhone: '5550002222',
     sendWhatsAppTicket: true,
+    createdAt: dateTimeDaysAgo(7, 17),
     items: [
       { productId: bySku.get('DEMO-CINE-COMBO')!.id, quantity: 2 },
       { productId: bySku.get('DEMO-JUGO-INF')!.id, quantity: 5 },
     ],
   });
-
-  await prisma.product.update({
-    where: { id: bySku.get('DEMO-PAPAS')!.id },
-    data: { stockCurrent: 4 },
+  await createSale({
+    folio: 'VTA-DEMO-003',
+    createdByUserId: cashier.id,
+    paymentMethod: PaymentMethod.TRANSFER,
+    customerPhone: '5550003333',
+    notes: 'Venta por transferencia para filtros de pago.',
+    items: [
+      { productId: bySku.get('DEMO-REFRESCO-LATA')!.id, quantity: 6 },
+      { productId: bySku.get('DEMO-JUGO-INF')!.id, quantity: 3 },
+    ],
   });
-  await prisma.inventoryMovement.create({
-    data: {
-      productId: bySku.get('DEMO-PAPAS')!.id,
-      type: InventoryMovementType.MANUAL_ADJUSTMENT_NEGATIVE,
-      quantity: -20,
-      previousStock: 24,
-      newStock: 4,
-      reason: 'Ajuste demo por conteo físico',
-      actorUserId: admin.id,
-      forcedByAdmin: false,
-    },
+
+  const papasBeforeAdjustment = await prisma.product.findUniqueOrThrow({
+    where: { id: bySku.get('DEMO-PAPAS')!.id },
+  });
+  await createManualInventoryAdjustment({
+    productId: papasBeforeAdjustment.id,
+    quantityDelta: 4 - papasBeforeAdjustment.stockCurrent,
+    reason: 'Ajuste demo negativo por conteo físico',
+    actorUserId: admin.id,
+  });
+  await createManualInventoryAdjustment({
+    productId: bySku.get('DEMO-AGUA-500')!.id,
+    quantityDelta: 5,
+    reason: 'Ajuste demo positivo por devolución al almacén',
+    actorUserId: admin.id,
+  });
+  await createSale({
+    folio: 'VTA-DEMO-004',
+    createdByUserId: admin.id,
+    paymentMethod: PaymentMethod.OTHER,
+    notes: 'Sobreventa forzada demo para probar autorización y stock negativo.',
+    forceNegativeStock: true,
+    items: [{ productId: papasBeforeAdjustment.id, quantity: 6 }],
   });
 
   await createReservation({
@@ -879,9 +1753,16 @@ async function main() {
     advanceAmount: 500,
     paymentMethod: PaymentMethod.TRANSFER,
     theme: 'Unicornios',
+    followUpStatus: BirthdayFollowUpStatus.PENDING,
+    historyActions: [
+      HistoryActionType.PUBLIC_UPDATED,
+      HistoryActionType.PUBLIC_LINK_REGENERATED,
+    ],
     eventForm: {
       eventType: EventType.BIRTHDAY_PARTY,
       requiresInvoice: false,
+      responsibleName: 'Ana Ramírez Demo',
+      celebrantBirthDate: birthDateForUpcomingBirthday(3, 8),
       packageType: EventPackageType.BASICO,
       guestCounts: { children: 30, adults: 12 },
       selectedOptions: {
@@ -908,9 +1789,13 @@ async function main() {
     advanceAmount: 4200,
     paymentMethod: PaymentMethod.CASH,
     theme: 'Superhéroes',
+    followUpStatus: BirthdayFollowUpStatus.CONTACTED,
+    historyActions: [HistoryActionType.REASSIGNED],
     eventForm: {
       eventType: EventType.BIRTHDAY_PARTY,
       requiresInvoice: true,
+      responsibleName: 'Roberto Gómez Demo',
+      celebrantBirthDate: birthDateForUpcomingBirthday(7, 9),
       packageType: EventPackageType.BASICO_SPA,
       guestCounts: { children: 40, adults: 15 },
       selectedOptions: {
@@ -922,9 +1807,8 @@ async function main() {
       addOns: {
         spa: {
           participants: 12,
-          manualPrice: 1800,
           observations: 'Spa demo con batas rosas y estación de maquillaje.',
-          isPricePending: false,
+          isPricePending: true,
         },
       },
       phone: '5552223333',
@@ -947,6 +1831,7 @@ async function main() {
     eventForm: {
       eventType: EventType.SPACE_RENTAL,
       requiresInvoice: false,
+      responsibleName: 'Mariana López Demo',
       areaType: EventAreaType.AREA_CHICA,
       guestCounts: { children: 18, adults: 10 },
       phone: '5553334444',
@@ -967,9 +1852,12 @@ async function main() {
     advanceAmount: 18000,
     paymentMethod: PaymentMethod.CARD,
     theme: 'Princesas',
+    followUpStatus: BirthdayFollowUpStatus.NOT_INTERESTED,
     eventForm: {
       eventType: EventType.BIRTHDAY_PARTY,
       requiresInvoice: false,
+      responsibleName: 'Paola Torres Demo',
+      celebrantBirthDate: birthDateForUpcomingBirthday(12, 7),
       packageType: EventPackageType.BASICO_DECORACION_PREMIUM,
       guestCounts: { children: 32, adults: 16 },
       selectedOptions: {
@@ -983,7 +1871,8 @@ async function main() {
           characterTheme: 'Princesas',
           balloonColors: 'Rosa, lila y dorado',
           manualPrice: 3500,
-          observations: 'Mampara completa con arco orgánico y figura de personaje.',
+          observations:
+            'Mampara completa con arco orgánico y figura de personaje.',
           isPricePending: false,
         },
       },
@@ -1007,6 +1896,7 @@ async function main() {
     eventForm: {
       eventType: EventType.PRIVATE_EVENT,
       requiresInvoice: true,
+      responsibleName: 'María Empresa Demo',
       privateEvent: {
         totalPeople: 120,
         appliedRange: '76 a 140 personas',
@@ -1016,7 +1906,8 @@ async function main() {
       guestCounts: { children: 70, adults: 50 },
       phone: '5556667777',
       address: 'Dirección empresa demo',
-      internalNotes: 'Horario privado permitido. Pago por transferencia, factura solicitada.',
+      internalNotes:
+        'Horario privado permitido. Pago por transferencia, factura solicitada.',
       generalComments: 'Evento corporativo familiar demo.',
     },
   });
@@ -1034,6 +1925,8 @@ async function main() {
     eventForm: {
       eventType: EventType.BIRTHDAY_PARTY,
       requiresInvoice: false,
+      responsibleName: 'Familia Cancelada Demo',
+      celebrantBirthDate: birthDateForUpcomingBirthday(40, 10),
       packageType: EventPackageType.BASICO,
       guestCounts: { children: 20, adults: 8 },
       selectedOptions: {
@@ -1045,6 +1938,62 @@ async function main() {
       phone: '5558889999',
       address: 'Dirección demo cancelada',
       internalNotes: 'Caso cancelado para filtros y calendario.',
+    },
+  });
+  await createReservation({
+    packageId: packages[0].id,
+    createdByUserId: admin.id,
+    celebrantName: 'Santiago Demo',
+    status: ReservationStatus.COMPLETED,
+    daysFromNow: -75,
+    startTime: '12:00',
+    endTime: '16:00',
+    attendeesCount: 35,
+    advanceAmount: 10875,
+    paymentMethod: PaymentMethod.TRANSFER,
+    theme: 'Dinosaurios',
+    followUpStatus: BirthdayFollowUpStatus.PENDING,
+    eventForm: {
+      eventType: EventType.BIRTHDAY_PARTY,
+      requiresInvoice: false,
+      responsibleName: 'Ana Ramírez Demo',
+      celebrantBirthDate: birthDateForUpcomingBirthday(13, 6),
+      packageType: EventPackageType.BASICO,
+      guestCounts: { children: 25, adults: 10 },
+      selectedOptions: {
+        freshWaterFlavor: EventDrinkOption.HORCHATA,
+        foodOption: EventFoodOption.PIZZA,
+        cakeProvider: EventCakeProvider.DAIRY_QUEEN,
+        cakeFlavor: 'Vainilla',
+      },
+      phone: '+52 555 123 4567',
+      address: 'Dirección demo Valentina',
+      internalNotes:
+        'Segundo festejado de la misma familia para probar consolidación.',
+    },
+    createdAt: dateTimeDaysAgo(110, 13),
+  });
+  await createReservation({
+    packageId: packages[0].id,
+    createdByUserId: cashier.id,
+    celebrantName: 'Renta Grande Demo',
+    status: ReservationStatus.REQUESTED,
+    daysFromNow: 27,
+    startTime: '13:00',
+    endTime: '17:00',
+    attendeesCount: 60,
+    advanceAmount: 0,
+    theme: 'Convivio familiar',
+    eventForm: {
+      eventType: EventType.SPACE_RENTAL,
+      requiresInvoice: true,
+      responsibleName: 'Elena Renta Demo',
+      areaType: EventAreaType.AREA_GRANDE,
+      guestCounts: { children: 30, adults: 30 },
+      phone: '5551012020',
+      address: 'Dirección demo renta grande',
+      internalNotes: 'Caso de área grande sin anticipo.',
+      generalComments: 'Solo incluye espacio, mobiliario y manteles.',
     },
   });
 
@@ -1087,10 +2036,58 @@ async function main() {
 
   await createCustomerReviews({ adminId: admin.id, cashierId: cashier.id });
   await createSpecialEvents({ adminId: admin.id });
+  await prisma.customer.update({
+    where: { normalizedPhone: '5551234567' },
+    data: {
+      internalNotes:
+        'Familia demo consolidada: dos festejados, reservaciones normales y boletos de evento especial.',
+    },
+  });
+  await createNotificationAndAuditScenarios({
+    adminId: admin.id,
+    cashierId: cashier.id,
+  });
+  await assertDemoCoverage();
 
-  console.log('Demo data reset complete. Users were preserved.');
+  const summary = await Promise.all([
+    prisma.product.count(),
+    prisma.purchase.count(),
+    prisma.sale.count(),
+    prisma.reservation.count(),
+    prisma.customer.count(),
+    prisma.celebrant.count(),
+    prisma.birthdayFollowUp.count(),
+    prisma.customerReview.count(),
+    prisma.specialEvent.count(),
+    prisma.specialEventReservation.count(),
+    prisma.specialEventTicket.count(),
+    prisma.notification.count(),
+  ]);
+
+  console.log('Demo data reset complete and coverage checks passed.');
   console.log('Admin: admin@magiccity.local / Admin123!');
   console.log('Cashier: cashier1@magiccity.local / Cashier123!');
+  console.log('Inactive user: cashier.inactive@magiccity.local / Inactive123!');
+  console.log(
+    [
+      `Products: ${summary[0]}`,
+      `Purchases: ${summary[1]}`,
+      `Sales: ${summary[2]}`,
+      `Reservations: ${summary[3]}`,
+      `Customers: ${summary[4]}`,
+      `Celebrants: ${summary[5]}`,
+      `Birthday follow-ups: ${summary[6]}`,
+      `Reviews: ${summary[7]}`,
+      `Special events: ${summary[8]}`,
+      `Special reservations: ${summary[9]}`,
+      `Tickets: ${summary[10]}`,
+      `Notifications: ${summary[11]}`,
+    ].join(' | '),
+  );
+  console.log('Demo public links:');
+  for (const link of demoPublicLinks) {
+    console.log(`- ${link.label}: ${link.path}`);
+  }
 }
 
 main()

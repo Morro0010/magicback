@@ -1,6 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsNumber,
@@ -11,6 +12,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { normalizeCalendarDateInput } from '../../common/utils/date.util';
 
 export enum EventDrinkOption {
   AGUA_FRESCA = 'AGUA_FRESCA',
@@ -220,6 +222,14 @@ export class EventFormDto {
   @Min(0)
   @Max(120)
   celebrantAge?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => normalizeCalendarDateInput(value))
+  @IsDateString(
+    { strict: true, strictSeparator: true },
+    { message: 'celebrantBirthDate must use a valid YYYY-MM-DD date' },
+  )
+  celebrantBirthDate?: string;
 
   @IsOptional()
   @IsString()

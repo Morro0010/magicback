@@ -13,14 +13,25 @@ import {
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomersService } from '../customers/customers.service';
 import {
+  getBusinessCalendarDate,
   parseEventDate,
   rangesOverlap,
   timeToMinutes,
   validateTimeRange,
 } from '../common/utils/date.util';
 import { calculateEditableUntil, toIsoDate } from '../common/utils/date.util';
-import { generateOpaqueToken, hashOpaqueToken, maskTokenForLogs } from '../common/utils/security.util';
+import {
+  generateOpaqueToken,
+  hashOpaqueToken,
+  maskTokenForLogs,
+} from '../common/utils/security.util';
+import {
+  formatPrivateEventFolio,
+  nextPrivateEventFolioNumber,
+  parsePublicFolioNumber,
+} from '../common/utils/public-folio.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { HistoryService } from '../history/history.service';
@@ -31,6 +42,7 @@ import { CancelReservationDto } from './dto/cancel-reservation.dto';
 import { ReassignReservationDto } from './dto/reassign-reservation.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto';
+import { EventType } from './dto/event-form.dto';
 import {
   calculateEventFormPricing,
   getEventFormValidationMessage,
@@ -66,15 +78,33 @@ export class ReservationsService {
     private readonly historyService: HistoryService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    private readonly customersService: CustomersService,
     @Optional() private readonly messagingService?: MessagingService,
   ) {}
 
   async listReservations(query: ListReservationsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const search = query.search?.trim();
+    const privateFolioNumber = search
+      ? parsePublicFolioNumber(search, 'PRV')
+      : null;
 
     const where: Prisma.ReservationWhereInput = {
       status: query.status,
+      OR: search
+        ? [
+            {
+              celebrantName: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+            ...(privateFolioNumber
+              ? [{ privateEventFolioNumber: privateFolioNumber }]
+              : []),
+          ]
+        : undefined,
     };
 
     if (query.from || query.to) {
@@ -99,7 +129,9 @@ export class ReservationsService {
       page,
       limit,
       total,
-      items: reservations.map((reservation) => this.toReservationResponse(reservation)),
+      items: reservations.map((reservation) =>
+        this.toReservationResponse(reservation),
+      ),
     };
   }
 
@@ -125,9 +157,15 @@ export class ReservationsService {
       : this.getDefaultEventDate();
     const normalizedEventForm = normalizeEventForm(dto.eventForm);
     let startTime =
-      dto.startTime ?? (normalizedEventForm.eventType === 'private_event' ? '08:00' : '11:00');
+      dto.startTime ??
+      (normalizedEventForm.eventType === EventType.PRIVATE_EVENT
+        ? '08:00'
+        : '11:00');
     let endTime =
-      dto.endTime ?? (normalizedEventForm.eventType === 'private_event' ? '12:00' : '14:00');
+      dto.endTime ??
+      (normalizedEventForm.eventType === EventType.PRIVATE_EVENT
+        ? '12:00'
+        : '14:00');
 
     this.assertValidTimeRange(startTime, endTime);
     this.assertEventBusinessRules(normalizedEventForm, startTime, endTime);
@@ -146,15 +184,25 @@ export class ReservationsService {
     const attendeesFromForm =
       normalizedEventForm.privateEvent.totalPeople ||
       normalizedEventForm.childrenCount + normalizedEventForm.adultsCount;
-    const attendeesCount = dto.attendeesCount ?? (attendeesFromForm > 0 ? attendeesFromForm : 1);
+    const attendeesCount =
+      dto.attendeesCount ?? (attendeesFromForm > 0 ? attendeesFromForm : 1);
 
-    const hasCompleteSchedule = Boolean(dto.eventDate && dto.startTime && dto.endTime);
-    if (normalizedEventForm.eventType && !hasCompleteSchedule && !dto.quickCapture) {
-      throw new BadRequestException('Selecciona fecha y horario para este tipo de evento.');
+    const hasCompleteSchedule = Boolean(
+      dto.eventDate && dto.startTime && dto.endTime,
+    );
+    if (
+      normalizedEventForm.eventType &&
+      !hasCompleteSchedule &&
+      !dto.quickCapture
+    ) {
+      throw new BadRequestException(
+        'Selecciona fecha y horario para este tipo de evento.',
+      );
     }
 
     const shouldAutoAssignSchedule =
-      Boolean(dto.quickCapture) || (!normalizedEventForm.eventType && !hasCompleteSchedule);
+      Boolean(dto.quickCapture) ||
+      (!normalizedEventForm.eventType && !hasCompleteSchedule);
 
     if (shouldAutoAssignSchedule) {
       const suggestedSchedule = await this.findNextAvailableSchedule({
@@ -165,7 +213,9 @@ export class ReservationsService {
       });
 
       if (!suggestedSchedule) {
-        throw new ConflictException('No available schedule found for quick capture');
+        throw new ConflictException(
+          'No available schedule found for quick capture',
+        );
       }
 
       eventDate = suggestedSchedule.eventDate;
@@ -184,20 +234,30 @@ export class ReservationsService {
       this.toNumber(packageRecord.price),
       normalizedEventForm,
     );
-    const pendingBalance = this.calculatePendingBalance(estimatedTotal, advanceAmount);
+    const pendingBalance = this.calculatePendingBalance(
+      estimatedTotal,
+      advanceAmount,
+    );
 
     const publicToken = generateOpaqueToken(32);
     const publicTokenHash = hashOpaqueToken(publicToken);
 
     const status =
       dto.status ??
-      (pendingBalance > 0 ? ReservationStatus.PENDING_PAYMENT : ReservationStatus.REQUESTED);
+      (pendingBalance > 0
+        ? ReservationStatus.PENDING_PAYMENT
+        : ReservationStatus.REQUESTED);
 
     const editableUntil = calculateEditableUntil(eventDate);
+    const privateEventFolioNumber =
+      normalizedEventForm.eventType === EventType.PRIVATE_EVENT
+        ? await nextPrivateEventFolioNumber(this.prisma)
+        : null;
 
     const reservation = await this.prisma.reservation.create({
       data: {
         publicTokenHash,
+        privateEventFolioNumber,
         celebrantName: dto.celebrantName.trim(),
         eventFormJson: normalizedEventForm,
         eventDate,
@@ -212,7 +272,7 @@ export class ReservationsService {
         advanceAmount,
         advancePaymentMethod: dto.advancePaymentMethod,
         pendingBalance,
-        paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : null,
+        paymentDate: dto.paymentDate ? parseEventDate(dto.paymentDate) : null,
         editableUntil,
         createdByUserId: actor.id,
         updatedByUserId: actor.id,
@@ -242,8 +302,14 @@ export class ReservationsService {
       relatedReservationId: reservation.id,
     });
 
-    await this.createPaymentPendingNotificationIfNeeded(reservation.id, pendingBalance);
-    await this.createUpcomingNotificationIfNeeded(reservation.id, reservation.eventDate);
+    await this.createPaymentPendingNotificationIfNeeded(
+      reservation.id,
+      pendingBalance,
+    );
+    await this.createUpcomingNotificationIfNeeded(
+      reservation.id,
+      reservation.eventDate,
+    );
 
     await this.auditService.log({
       eventType: 'RESERVATION_CREATED',
@@ -257,6 +323,12 @@ export class ReservationsService {
         tokenHint: maskTokenForLogs(publicToken),
       },
     });
+
+    await this.customersService.linkReservationFromEventForm(
+      reservation.id,
+      normalizedEventForm,
+      reservation.celebrantName,
+    );
 
     return {
       ...this.toReservationResponse(reservation),
@@ -282,7 +354,9 @@ export class ReservationsService {
       throw new BadRequestException('Cancelled reservations cannot be edited');
     }
 
-    const targetDate = dto.eventDate ? parseEventDate(dto.eventDate) : current.eventDate;
+    const targetDate = dto.eventDate
+      ? parseEventDate(dto.eventDate)
+      : current.eventDate;
     const targetStart = dto.startTime ?? current.startTime;
     const targetEnd = dto.endTime ?? current.endTime;
 
@@ -320,7 +394,8 @@ export class ReservationsService {
     this.assertEventBusinessRules(mergedEventForm, targetStart, targetEnd);
 
     const dateChanged = toIsoDate(targetDate) !== toIsoDate(current.eventDate);
-    const timeChanged = targetStart !== current.startTime || targetEnd !== current.endTime;
+    const timeChanged =
+      targetStart !== current.startTime || targetEnd !== current.endTime;
 
     if (dateChanged || timeChanged) {
       await this.assertSlotAvailability({
@@ -335,31 +410,46 @@ export class ReservationsService {
     const targetPackage =
       targetPackageId === current.packageId
         ? current.package
-        : await this.prisma.package.findUnique({ where: { id: targetPackageId } });
+        : await this.prisma.package.findUnique({
+            where: { id: targetPackageId },
+          });
 
     if (!targetPackage || !targetPackage.isActive) {
       throw new NotFoundException('Package not found or inactive');
     }
 
-    const nextAdvanceAmount = dto.advanceAmount ?? this.toNumber(current.advanceAmount);
+    const nextAdvanceAmount =
+      dto.advanceAmount ?? this.toNumber(current.advanceAmount);
     const nextEstimatedTotal = this.calculateReservationTotal(
       this.toNumber(targetPackage.price),
       mergedEventForm,
     );
-    const nextPendingBalance = this.calculatePendingBalance(nextEstimatedTotal, nextAdvanceAmount);
+    const nextPendingBalance = this.calculatePendingBalance(
+      nextEstimatedTotal,
+      nextAdvanceAmount,
+    );
     const attendeesFromForm =
       mergedEventForm.privateEvent.totalPeople ||
       mergedEventForm.childrenCount + mergedEventForm.adultsCount;
     const nextAttendeesCount =
-      dto.attendeesCount ?? (attendeesFromForm > 0 ? attendeesFromForm : current.attendeesCount);
+      dto.attendeesCount ??
+      (attendeesFromForm > 0 ? attendeesFromForm : current.attendeesCount);
 
     const nextStatus = dto.status ?? current.status;
-    const editableUntil = dateChanged ? calculateEditableUntil(targetDate) : current.editableUntil;
+    const privateEventFolioNumber =
+      current.privateEventFolioNumber ??
+      (mergedEventForm.eventType === EventType.PRIVATE_EVENT
+        ? await nextPrivateEventFolioNumber(this.prisma)
+        : null);
+    const editableUntil = dateChanged
+      ? calculateEditableUntil(targetDate)
+      : current.editableUntil;
 
     const updated = await this.prisma.reservation.update({
       where: { id: reservationId },
       data: {
         celebrantName: dto.celebrantName?.trim(),
+        privateEventFolioNumber,
         eventDate: targetDate,
         startTime: targetStart,
         endTime: targetEnd,
@@ -373,20 +463,29 @@ export class ReservationsService {
               : undefined
             : dto.theme?.trim() || null,
         foodDetails:
-          dto.foodDetails === undefined ? undefined : dto.foodDetails?.trim() || null,
+          dto.foodDetails === undefined
+            ? undefined
+            : dto.foodDetails?.trim() || null,
         notes: dto.notes === undefined ? undefined : dto.notes?.trim() || null,
         status: nextStatus,
         advanceAmount: nextAdvanceAmount,
         advancePaymentMethod: dto.advancePaymentMethod,
         pendingBalance: nextPendingBalance,
-        paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined,
+        paymentDate: dto.paymentDate
+          ? parseEventDate(dto.paymentDate)
+          : undefined,
         editableUntil,
         updatedByUserId: actor.id,
       },
       include: RESERVATION_INCLUDE,
     });
 
-    await this.trackFieldChanges(current, updated, actor.id, HistoryActionType.UPDATED);
+    await this.trackFieldChanges(
+      current,
+      updated,
+      actor.id,
+      HistoryActionType.UPDATED,
+    );
     if (dto.eventForm) {
       await this.historyService.createEntry({
         reservationId: reservationId,
@@ -405,8 +504,14 @@ export class ReservationsService {
       relatedReservationId: updated.id,
     });
 
-    await this.createPaymentPendingNotificationIfNeeded(updated.id, nextPendingBalance);
-    await this.createUpcomingNotificationIfNeeded(updated.id, updated.eventDate);
+    await this.createPaymentPendingNotificationIfNeeded(
+      updated.id,
+      nextPendingBalance,
+    );
+    await this.createUpcomingNotificationIfNeeded(
+      updated.id,
+      updated.eventDate,
+    );
 
     await this.auditService.log({
       eventType: 'RESERVATION_UPDATED',
@@ -419,6 +524,12 @@ export class ReservationsService {
       },
     });
 
+    await this.customersService.linkReservationFromEventForm(
+      updated.id,
+      mergedEventForm,
+      updated.celebrantName,
+    );
+
     return this.toReservationResponse(updated);
   }
 
@@ -427,7 +538,9 @@ export class ReservationsService {
     dto: CancelReservationDto,
     actor: { id: string; ipAddress?: string; userAgent?: string },
   ) {
-    const current = await this.prisma.reservation.findUnique({ where: { id: reservationId } });
+    const current = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+    });
     if (!current) {
       throw new NotFoundException('Reservation not found');
     }
@@ -485,13 +598,17 @@ export class ReservationsService {
   ) {
     this.assertValidTimeRange(dto.startTime, dto.endTime);
 
-    const current = await this.prisma.reservation.findUnique({ where: { id: reservationId } });
+    const current = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+    });
     if (!current) {
       throw new NotFoundException('Reservation not found');
     }
 
     if (current.status === ReservationStatus.CANCELLED) {
-      throw new BadRequestException('Cancelled reservations cannot be reassigned');
+      throw new BadRequestException(
+        'Cancelled reservations cannot be reassigned',
+      );
     }
 
     const currentEventForm = this.parseEventForm(current.eventFormJson);
@@ -542,7 +659,10 @@ export class ReservationsService {
       relatedReservationId: updated.id,
     });
 
-    await this.createUpcomingNotificationIfNeeded(updated.id, updated.eventDate);
+    await this.createUpcomingNotificationIfNeeded(
+      updated.id,
+      updated.eventDate,
+    );
 
     await this.auditService.log({
       eventType: 'RESERVATION_REASSIGNED',
@@ -575,7 +695,9 @@ export class ReservationsService {
     }
 
     if (current.status === ReservationStatus.CANCELLED) {
-      throw new BadRequestException('Cancelled reservations cannot receive payments');
+      throw new BadRequestException(
+        'Cancelled reservations cannot receive payments',
+      );
     }
 
     const nextAdvanceAmount = this.toNumber(current.advanceAmount) + dto.amount;
@@ -584,7 +706,10 @@ export class ReservationsService {
       this.toNumber(current.package.price),
       eventForm,
     );
-    const nextPendingBalance = this.calculatePendingBalance(estimatedTotal, nextAdvanceAmount);
+    const nextPendingBalance = this.calculatePendingBalance(
+      estimatedTotal,
+      nextAdvanceAmount,
+    );
 
     const nextStatus =
       current.status === ReservationStatus.COMPLETED
@@ -593,7 +718,9 @@ export class ReservationsService {
           ? ReservationStatus.PENDING_PAYMENT
           : ReservationStatus.CONFIRMED;
 
-    const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+    const paymentDate = dto.paymentDate
+      ? parseEventDate(dto.paymentDate)
+      : parseEventDate(getBusinessCalendarDate());
 
     const updated = await this.prisma.reservation.update({
       where: { id: reservationId },
@@ -624,7 +751,10 @@ export class ReservationsService {
     });
 
     if (nextPendingBalance > 0) {
-      await this.createPaymentPendingNotificationIfNeeded(updated.id, nextPendingBalance);
+      await this.createPaymentPendingNotificationIfNeeded(
+        updated.id,
+        nextPendingBalance,
+      );
     }
 
     await this.notificationsService.createNotification({
@@ -634,13 +764,21 @@ export class ReservationsService {
       relatedReservationId: updated.id,
     });
 
-    if (this.messagingService && this.toNumber(current.pendingBalance) > 0 && nextPendingBalance === 0) {
+    if (
+      this.messagingService &&
+      this.toNumber(current.pendingBalance) > 0 &&
+      nextPendingBalance === 0
+    ) {
       try {
         await this.messagingService.sendReservationConfirmed({
           reservationId: updated.id,
           customerName: eventForm.responsibleName || updated.celebrantName,
           customerPhone: eventForm.phone,
-          folio: updated.id,
+          folio:
+            eventForm.eventType === EventType.PRIVATE_EVENT
+              ? (formatPrivateEventFolio(updated.privateEventFolioNumber) ??
+                updated.id)
+              : updated.id,
           eventDate: toIsoDate(updated.eventDate),
           startTime: updated.startTime,
           endTime: updated.endTime,
@@ -667,7 +805,9 @@ export class ReservationsService {
   }
 
   async getReservationHistory(reservationId: string) {
-    const exists = await this.prisma.reservation.findUnique({ where: { id: reservationId } });
+    const exists = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+    });
     if (!exists) {
       throw new NotFoundException('Reservation not found');
     }
@@ -679,7 +819,9 @@ export class ReservationsService {
     reservationId: string,
     actor: { id: string; ipAddress?: string; userAgent?: string },
   ) {
-    const reservation = await this.prisma.reservation.findUnique({ where: { id: reservationId } });
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { id: reservationId },
+    });
     if (!reservation) {
       throw new NotFoundException('Reservation not found');
     }
@@ -733,16 +875,25 @@ export class ReservationsService {
     });
 
     const blockedConflict = blockedSlots.find((slot) =>
-      rangesOverlap(input.startTime, input.endTime, slot.startTime, slot.endTime),
+      rangesOverlap(
+        input.startTime,
+        input.endTime,
+        slot.startTime,
+        slot.endTime,
+      ),
     );
 
     if (blockedConflict) {
-      throw new ConflictException('Requested time overlaps a blocked slot');
+      throw new ConflictException(
+        'Esta fecha u horario ya no está disponible. Por favor selecciona otra opción.',
+      );
     }
 
     const reservations = await this.prisma.reservation.findMany({
       where: {
-        id: input.excludeReservationId ? { not: input.excludeReservationId } : undefined,
+        id: input.excludeReservationId
+          ? { not: input.excludeReservationId }
+          : undefined,
         eventDate: input.eventDate,
         status: {
           not: ReservationStatus.CANCELLED,
@@ -756,11 +907,18 @@ export class ReservationsService {
     });
 
     const conflict = reservations.find((reservation) =>
-      rangesOverlap(input.startTime, input.endTime, reservation.startTime, reservation.endTime),
+      rangesOverlap(
+        input.startTime,
+        input.endTime,
+        reservation.startTime,
+        reservation.endTime,
+      ),
     );
 
     if (conflict) {
-      throw new ConflictException('Requested time overlaps an existing reservation');
+      throw new ConflictException(
+        'Esta fecha u horario ya no está disponible. Por favor selecciona otra opción.',
+      );
     }
   }
 
@@ -774,7 +932,9 @@ export class ReservationsService {
 
   private getDefaultEventDate(): Date {
     const now = new Date();
-    const baseDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const baseDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     baseDate.setUTCDate(baseDate.getUTCDate() + 14);
     return baseDate;
   }
@@ -785,7 +945,8 @@ export class ReservationsService {
     endTime: string;
     eventForm: EventFormPayload;
   }): Promise<{ eventDate: Date; startTime: string; endTime: string } | null> {
-    const durationMinutes = timeToMinutes(input.endTime) - timeToMinutes(input.startTime);
+    const durationMinutes =
+      timeToMinutes(input.endTime) - timeToMinutes(input.startTime);
     const firstDay = new Date(input.eventDate);
 
     for (let dayOffset = 0; dayOffset < 45; dayOffset += 1) {
@@ -869,7 +1030,11 @@ export class ReservationsService {
     actorUserId: string,
     actionType: HistoryActionType,
   ): Promise<void> {
-    const changes: Array<{ field: string; oldValue: unknown; newValue: unknown }> = [];
+    const changes: Array<{
+      field: string;
+      oldValue: unknown;
+      newValue: unknown;
+    }> = [];
 
     const beforeComparable = {
       celebrantName: before.celebrantName,
@@ -901,17 +1066,17 @@ export class ReservationsService {
       pendingBalance: Number(after.pendingBalance.toString()),
     };
 
-    (Object.keys(beforeComparable) as Array<keyof typeof beforeComparable>).forEach(
-      (fieldKey) => {
-        if (beforeComparable[fieldKey] !== afterComparable[fieldKey]) {
-          changes.push({
-            field: fieldKey,
-            oldValue: beforeComparable[fieldKey],
-            newValue: afterComparable[fieldKey],
-          });
-        }
-      },
-    );
+    (
+      Object.keys(beforeComparable) as Array<keyof typeof beforeComparable>
+    ).forEach((fieldKey) => {
+      if (beforeComparable[fieldKey] !== afterComparable[fieldKey]) {
+        changes.push({
+          field: fieldKey,
+          oldValue: beforeComparable[fieldKey],
+          newValue: afterComparable[fieldKey],
+        });
+      }
+    });
 
     if (changes.length === 0) {
       await this.historyService.createEntry({
@@ -945,8 +1110,16 @@ export class ReservationsService {
     }
   }
 
-  private assertEventBusinessRules(eventForm: EventFormPayload, startTime: string, endTime: string): void {
-    const scheduleMessage = getEventScheduleValidationMessage(eventForm, startTime, endTime);
+  private assertEventBusinessRules(
+    eventForm: EventFormPayload,
+    startTime: string,
+    endTime: string,
+  ): void {
+    const scheduleMessage = getEventScheduleValidationMessage(
+      eventForm,
+      startTime,
+      endTime,
+    );
     if (scheduleMessage) {
       throw new BadRequestException(scheduleMessage);
     }
@@ -957,11 +1130,17 @@ export class ReservationsService {
     }
   }
 
-  private calculatePendingBalance(packagePrice: number, advanceAmount: number): number {
+  private calculatePendingBalance(
+    packagePrice: number,
+    advanceAmount: number,
+  ): number {
     return Number(Math.max(packagePrice - advanceAmount, 0).toFixed(2));
   }
 
-  private calculateReservationTotal(packagePrice: number, eventForm: EventFormPayload): number {
+  private calculateReservationTotal(
+    packagePrice: number,
+    eventForm: EventFormPayload,
+  ): number {
     const eventPricing = calculateEventFormPricing(eventForm);
 
     if (isMagicEventConfigured(eventForm)) {
@@ -984,8 +1163,10 @@ export class ReservationsService {
       .filter(Boolean);
 
     return (
-      frontendOrigins.find((origin) => origin.startsWith('http://') || origin.startsWith('https://')) ??
-      frontendOrigins[0]
+      frontendOrigins.find(
+        (origin) =>
+          origin.startsWith('http://') || origin.startsWith('https://'),
+      ) ?? frontendOrigins[0]
     );
   }
 
@@ -1015,7 +1196,8 @@ export class ReservationsService {
   ): Promise<void> {
     const now = new Date();
     const daysUntilEvent =
-      (eventDate.getTime() - new Date(now.toISOString().slice(0, 10) + 'T00:00:00.000Z').getTime()) /
+      (eventDate.getTime() -
+        new Date(now.toISOString().slice(0, 10) + 'T00:00:00.000Z').getTime()) /
       (1000 * 60 * 60 * 24);
 
     if (daysUntilEvent >= 0 && daysUntilEvent <= 7) {
@@ -1036,6 +1218,10 @@ export class ReservationsService {
     const eventForm = this.parseEventForm(reservation.eventFormJson);
     return {
       id: reservation.id,
+      publicFolio:
+        eventForm.eventType === EventType.PRIVATE_EVENT
+          ? formatPrivateEventFolio(reservation.privateEventFolioNumber)
+          : null,
       celebrantName: reservation.celebrantName,
       eventForm,
       eventFormPricing: calculateEventFormPricing(eventForm),

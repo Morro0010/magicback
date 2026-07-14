@@ -14,7 +14,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import {
   calculateEditableUntil,
-  isEditionLocked,
+  formatCalendarDateEs,
+  getMinimumPublicReservationDate,
+  isPublicReservationDateAllowed,
+  isPublicReservationEditionLocked,
   parseEventDate,
   rangesOverlap,
   toIsoDate,
@@ -24,11 +27,17 @@ import {
   hashOpaqueToken,
   maskTokenForLogs,
 } from '../common/utils/security.util';
+import {
+  formatPrivateEventFolio,
+  nextPrivateEventFolioNumber,
+} from '../common/utils/public-folio.util';
 import { PublicAvailabilityQueryDto } from './dto/public-availability-query.dto';
 import { UpdatePublicReservationDto } from './dto/update-public-reservation.dto';
+import { EventType } from '../reservations/dto/event-form.dto';
 import { HistoryService } from '../history/history.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../common/services/audit.service';
+import { CustomersService } from '../customers/customers.service';
 import {
   calculateEventFormPricing,
   getEventFormValidationMessage,
@@ -51,6 +60,7 @@ export class PublicReservationsService {
     private readonly historyService: HistoryService,
     private readonly notificationsService: NotificationsService,
     private readonly auditService: AuditService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async getPublicReservationByToken(
@@ -96,6 +106,7 @@ export class PublicReservationsService {
     }
 
     const date = parseEventDate(query.date);
+    this.assertPublicDateAllowed(date);
     const [reservations, blockedSlots] = await this.prisma.$transaction([
       this.prisma.reservation.findMany({
         where: {
@@ -171,9 +182,15 @@ export class PublicReservationsService {
       throw new NotFoundException('Reservation link not found');
     }
 
-    if (isEditionLocked(current.editableUntil)) {
+    if (current.status === ReservationStatus.CANCELLED) {
       throw new ForbiddenException(
-        'La reservación ya no puede editarse. Quedan 3 días o menos para el evento.',
+        'Una reservación cancelada no puede modificarse desde el enlace público.',
+      );
+    }
+
+    if (isPublicReservationEditionLocked(current.eventDate)) {
+      throw new ForbiddenException(
+        'Tu evento está próximo y las modificaciones en línea ya están cerradas. Para solicitar algún cambio, comunícate directamente con administración de Magic City.',
       );
     }
 
@@ -182,11 +199,14 @@ export class PublicReservationsService {
       : current.eventDate;
     const targetStart = dto.startTime ?? current.startTime;
     const targetEnd = dto.endTime ?? current.endTime;
+    this.assertPublicDateAllowed(targetDate);
 
     try {
       validateTimeRange(targetStart, targetEnd);
     } catch {
-      throw new BadRequestException('Invalid time range');
+      throw new BadRequestException(
+        'El horario de inicio debe ser anterior al horario de cierre.',
+      );
     }
 
     const currentEventForm = this.parseEventForm(current.eventFormJson);
@@ -216,6 +236,9 @@ export class PublicReservationsService {
             ...currentEventForm.privateEvent,
             ...dto.eventForm.privateEvent,
           },
+          celebrantBirthDate:
+            currentEventForm.celebrantBirthDate ??
+            dto.eventForm.celebrantBirthDate,
         })
       : currentEventForm;
 
@@ -250,7 +273,10 @@ export class PublicReservationsService {
     const packageRecord = await this.prisma.package.findUnique({
       where: { id: packageId },
     });
-    if (!packageRecord || !packageRecord.isActive) {
+    if (
+      !packageRecord ||
+      (packageId !== current.packageId && !packageRecord.isActive)
+    ) {
       throw new NotFoundException('Package not found or inactive');
     }
 
@@ -271,6 +297,11 @@ export class PublicReservationsService {
       estimatedTotal - Number(current.advanceAmount.toString()),
       0,
     );
+    const privateEventFolioNumber =
+      current.privateEventFolioNumber ??
+      (mergedEventForm.eventType === EventType.PRIVATE_EVENT
+        ? await nextPrivateEventFolioNumber(this.prisma)
+        : null);
 
     const updated = await this.prisma.reservation.update({
       where: {
@@ -278,6 +309,7 @@ export class PublicReservationsService {
       },
       data: {
         celebrantName: dto.celebrantName?.trim(),
+        privateEventFolioNumber,
         eventDate: targetDate,
         startTime: targetStart,
         endTime: targetEnd,
@@ -293,6 +325,7 @@ export class PublicReservationsService {
         foodDetails:
           dto.foodDetails === undefined ? undefined : dto.foodDetails.trim(),
         notes: dto.notes === undefined ? undefined : dto.notes.trim(),
+        status: ReservationStatus.REQUESTED,
         pendingBalance: Number(nextPending.toFixed(2)),
         editableUntil: dateChanged
           ? calculateEditableUntil(targetDate)
@@ -311,12 +344,22 @@ export class PublicReservationsService {
         eventDate: toIsoDate(current.eventDate),
         startTime: current.startTime,
         endTime: current.endTime,
+        attendeesCount: current.attendeesCount,
+        packageId: current.packageId,
+        eventForm: currentEventForm,
+        pendingBalance: Number(current.pendingBalance.toString()),
       },
       newValue: {
         celebrantName: updated.celebrantName,
         eventDate: toIsoDate(updated.eventDate),
         startTime: updated.startTime,
         endTime: updated.endTime,
+        attendeesCount: updated.attendeesCount,
+        packageId: updated.packageId,
+        eventForm: mergedEventForm,
+        estimatedTotal: Number(estimatedTotal.toFixed(2)),
+        pendingBalance: Number(nextPending.toFixed(2)),
+        status: ReservationStatus.REQUESTED,
       },
     });
 
@@ -337,6 +380,12 @@ export class PublicReservationsService {
       },
     });
 
+    await this.customersService.linkReservationFromEventForm(
+      updated.id,
+      mergedEventForm,
+      updated.celebrantName,
+    );
+
     return this.toPublicReservationResponse(updated);
   }
 
@@ -354,8 +403,14 @@ export class PublicReservationsService {
       include: typeof PUBLIC_RESERVATION_INCLUDE;
     }>,
   ) {
-    const editable = !isEditionLocked(reservation.editableUntil);
+    const editable =
+      reservation.status !== ReservationStatus.CANCELLED &&
+      !isPublicReservationEditionLocked(reservation.eventDate);
     const eventForm = this.parseEventForm(reservation.eventFormJson);
+    const publicEventForm = {
+      ...eventForm,
+      celebrantBirthDate: null,
+    };
 
     return {
       celebrantName: reservation.celebrantName,
@@ -369,17 +424,25 @@ export class PublicReservationsService {
         name: reservation.package.name,
         price: Number(reservation.package.price.toString()),
       },
-      eventForm,
-      eventFormPricing: calculateEventFormPricing(eventForm),
+      eventForm: publicEventForm,
+      eventFormPricing: calculateEventFormPricing(publicEventForm),
       theme: reservation.theme,
       foodDetails: reservation.foodDetails,
       notes: reservation.notes,
       status: reservation.status,
+      publicFolio:
+        eventForm.eventType === EventType.PRIVATE_EVENT
+          ? formatPrivateEventFolio(reservation.privateEventFolioNumber)
+          : null,
       editableUntil: reservation.editableUntil,
       isEditable: editable,
+      minimumAllowedDate: getMinimumPublicReservationDate(),
+      hasCelebrantBirthDate: Boolean(eventForm.celebrantBirthDate),
       editionMessage: editable
         ? null
-        : 'Edición bloqueada: faltan 3 días o menos para la fecha del evento.',
+        : reservation.status === ReservationStatus.CANCELLED
+          ? 'Esta reservación está cancelada y no admite modificaciones en línea. Si necesitas ayuda, comunícate directamente con administración de Magic City.'
+          : 'Tu evento está próximo y las modificaciones en línea ya están cerradas. Para solicitar algún cambio, comunícate directamente con administración de Magic City. Este cierre nos ayuda a preparar correctamente todos los detalles de tu evento.',
       updatedAt: reservation.updatedAt,
     };
   }
@@ -390,5 +453,16 @@ export class PublicReservationsService {
     }
 
     return normalizeEventForm(value as EventFormPayload);
+  }
+
+  private assertPublicDateAllowed(eventDate: Date) {
+    if (isPublicReservationDateAllowed(eventDate)) {
+      return;
+    }
+
+    const minimumDate = getMinimumPublicReservationDate();
+    throw new BadRequestException(
+      `Las reservaciones deben realizarse con al menos tres días completos de anticipación. Por favor selecciona una fecha a partir del ${formatCalendarDateEs(minimumDate)}.`,
+    );
   }
 }

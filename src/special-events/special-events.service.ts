@@ -13,8 +13,22 @@ import {
   SpecialEventReservationStatus,
   SpecialEventStatus,
 } from '@prisma/client';
-import { parseEventDate, rangesOverlap, toIsoDate, validateTimeRange } from '../common/utils/date.util';
-import { generateOpaqueToken, hashOpaqueToken } from '../common/utils/security.util';
+import {
+  parseEventDate,
+  rangesOverlap,
+  toIsoDate,
+  validateTimeRange,
+} from '../common/utils/date.util';
+import {
+  generateOpaqueToken,
+  hashOpaqueToken,
+} from '../common/utils/security.util';
+import {
+  formatSpecialEventFolio,
+  formatSpecialEventTicketPrefix,
+  parsePublicFolioNumber,
+} from '../common/utils/public-folio.util';
+import { CustomersService } from '../customers/customers.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSpecialEventReservationDto } from './dto/create-special-event-reservation.dto';
@@ -41,7 +55,9 @@ const SPECIAL_RESERVATION_INCLUDE = {
   cancelledByUser: { select: { id: true, name: true, role: true } },
 } satisfies Prisma.SpecialEventReservationInclude;
 
-type SpecialEventWithInclude = Prisma.SpecialEventGetPayload<{ include: typeof SPECIAL_EVENT_INCLUDE }>;
+type SpecialEventWithInclude = Prisma.SpecialEventGetPayload<{
+  include: typeof SPECIAL_EVENT_INCLUDE;
+}>;
 type SpecialReservationWithInclude = Prisma.SpecialEventReservationGetPayload<{
   include: typeof SPECIAL_RESERVATION_INCLUDE;
 }>;
@@ -53,6 +69,7 @@ export class SpecialEventsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly messagingService: MessagingService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async listAdminEvents(query: ListSpecialEventsQueryDto = {}) {
@@ -63,7 +80,12 @@ export class SpecialEventsService {
       OR: query.search
         ? [
             { name: { contains: query.search.trim(), mode: 'insensitive' } },
-            { description: { contains: query.search.trim(), mode: 'insensitive' } },
+            {
+              description: {
+                contains: query.search.trim(),
+                mode: 'insensitive',
+              },
+            },
           ]
         : undefined,
       eventDate:
@@ -86,7 +108,9 @@ export class SpecialEventsService {
       }),
     ]);
 
-    const items = await Promise.all(events.map((event) => this.toEventResponse(event)));
+    const items = await Promise.all(
+      events.map((event) => this.toEventResponse(event)),
+    );
     return { page, limit, total, items };
   }
 
@@ -103,7 +127,9 @@ export class SpecialEventsService {
     });
 
     return {
-      items: await Promise.all(events.map((event) => this.toEventResponse(event))),
+      items: await Promise.all(
+        events.map((event) => this.toEventResponse(event)),
+      ),
     };
   }
 
@@ -123,7 +149,9 @@ export class SpecialEventsService {
 
   async createEvent(dto: CreateSpecialEventDto, actorUserId: string) {
     if (dto.status && dto.status !== SpecialEventStatus.DRAFT) {
-      throw new BadRequestException('Usa las acciones de publicación para cambiar el estado del evento');
+      throw new BadRequestException(
+        'Usa las acciones de publicación para cambiar el estado del evento',
+      );
     }
 
     this.assertValidEventInput(dto);
@@ -149,9 +177,15 @@ export class SpecialEventsService {
     return this.toEventResponse(created);
   }
 
-  async updateEvent(id: string, dto: UpdateSpecialEventDto, actorUserId: string) {
+  async updateEvent(
+    id: string,
+    dto: UpdateSpecialEventDto,
+    actorUserId: string,
+  ) {
     if (dto.status) {
-      throw new BadRequestException('Usa las acciones de publicación para cambiar el estado del evento');
+      throw new BadRequestException(
+        'Usa las acciones de publicación para cambiar el estado del evento',
+      );
     }
 
     const current = await this.findEventOrThrow(id);
@@ -171,7 +205,9 @@ export class SpecialEventsService {
 
     const activeSeats = await this.countReservedSeats(id);
     if (next.capacityMax < activeSeats) {
-      throw new BadRequestException('El cupo máximo no puede ser menor al cupo ya reservado');
+      throw new BadRequestException(
+        'El cupo máximo no puede ser menor al cupo ya reservado',
+      );
     }
 
     if (current.status === SpecialEventStatus.PUBLISHED) {
@@ -201,7 +237,10 @@ export class SpecialEventsService {
         include: SPECIAL_EVENT_INCLUDE,
       });
 
-      if (event.status === SpecialEventStatus.PUBLISHED && event.blockedSlotId) {
+      if (
+        event.status === SpecialEventStatus.PUBLISHED &&
+        event.blockedSlotId
+      ) {
         await tx.blockedSlot.update({
           where: { id: event.blockedSlotId },
           data: {
@@ -226,7 +265,9 @@ export class SpecialEventsService {
     }
 
     if (event.eventDate < this.today()) {
-      throw new BadRequestException('No se puede publicar un evento en fecha pasada');
+      throw new BadRequestException(
+        'No se puede publicar un evento en fecha pasada',
+      );
     }
 
     await this.ensureCanBlockDate({
@@ -292,21 +333,43 @@ export class SpecialEventsService {
   }
 
   async cancelEvent(id: string, actorUserId: string) {
-    return this.setInactiveStatus(id, SpecialEventStatus.CANCELLED, actorUserId);
+    return this.setInactiveStatus(
+      id,
+      SpecialEventStatus.CANCELLED,
+      actorUserId,
+    );
   }
 
-  async listEventReservations(eventId: string, query: ListSpecialEventReservationsQueryDto = {}) {
+  async listEventReservations(
+    eventId: string,
+    query: ListSpecialEventReservationsQueryDto = {},
+  ) {
     await this.findEventOrThrow(eventId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
-    const numericSearch = query.search && /^\d+$/.test(query.search.trim()) ? Number(query.search.trim()) : undefined;
+    const numericSearch = query.search
+      ? (parsePublicFolioNumber(query.search, 'EVT') ??
+        (/^\d+$/.test(query.search.trim())
+          ? Number(query.search.trim())
+          : undefined))
+      : undefined;
     const where: Prisma.SpecialEventReservationWhereInput = {
       specialEventId: eventId,
       status: query.status,
       OR: query.search
         ? [
-            { holderName: { contains: query.search.trim(), mode: 'insensitive' } },
-            { holderPhone: { contains: query.search.trim(), mode: 'insensitive' } },
+            {
+              holderName: {
+                contains: query.search.trim(),
+                mode: 'insensitive',
+              },
+            },
+            {
+              holderPhone: {
+                contains: query.search.trim(),
+                mode: 'insensitive',
+              },
+            },
             ...(numericSearch ? [{ folioNumber: numericSearch }] : []),
           ]
         : undefined,
@@ -327,7 +390,9 @@ export class SpecialEventsService {
       page,
       limit,
       total,
-      items: reservations.map((reservation) => this.toReservationResponse(reservation, true)),
+      items: reservations.map((reservation) =>
+        this.toReservationResponse(reservation, true),
+      ),
     };
   }
 
@@ -348,16 +413,29 @@ export class SpecialEventsService {
     return this.toReservationResponse(reservation, true);
   }
 
-  async createPublicReservation(eventId: string, dto: CreateSpecialEventReservationDto) {
+  async createPublicReservation(
+    eventId: string,
+    dto: CreateSpecialEventReservationDto,
+  ) {
     const publicToken = generateOpaqueToken(32);
+    const attendees = this.normalizeReservationAttendees(
+      dto.holderName,
+      dto.attendees,
+    );
     const reservation = await this.prisma.$transaction(async (tx) => {
       await this.lockEvent(tx, eventId);
-      const event = await tx.specialEvent.findUnique({ where: { id: eventId } });
+      const event = await tx.specialEvent.findUnique({
+        where: { id: eventId },
+      });
       if (!event || !this.isPubliclyReservable(event)) {
         throw new BadRequestException('Evento no disponible para reservar');
       }
 
-      const totals = await this.calculateReservationTotals(tx, event, dto.attendees);
+      const totals = await this.calculateReservationTotals(
+        tx,
+        event,
+        attendees,
+      );
       const created = await tx.specialEventReservation.create({
         data: {
           specialEventId: event.id,
@@ -373,12 +451,16 @@ export class SpecialEventsService {
       });
 
       await tx.specialEventTicket.createMany({
-        data: dto.attendees.map((attendee, index) => ({
+        data: attendees.map((attendee, index) => ({
           reservationId: created.id,
           code: this.buildTicketCode(created.folioNumber, index),
           attendeeName: attendee.name.trim(),
           attendeeType: attendee.type,
-          price: attendee.type === SpecialEventAttendeeType.CHILD ? event.childPrice : event.adultPrice,
+          isReservationHolder: attendee.isReservationHolder,
+          price:
+            attendee.type === SpecialEventAttendeeType.CHILD
+              ? event.childPrice
+              : event.adultPrice,
         })),
       });
 
@@ -389,28 +471,52 @@ export class SpecialEventsService {
     });
 
     await this.trySendSpecialReservationCreated(reservation, publicToken);
+    await this.customersService.linkSpecialEventReservation({
+      reservationId: reservation.id,
+      holderName: reservation.holderName,
+      holderPhone: reservation.holderPhone,
+      holderEmail: reservation.holderEmail,
+    });
     return {
       ...this.toReservationResponse(reservation, true),
       publicLink: this.buildPublicReservationUrl(publicToken),
     };
   }
 
-  async updatePublicReservationByToken(token: string, dto: CreateSpecialEventReservationDto) {
+  async updatePublicReservationByToken(
+    token: string,
+    dto: CreateSpecialEventReservationDto,
+  ) {
     const current = await this.findReservationByTokenOrThrow(token);
     if (current.status !== SpecialEventReservationStatus.PENDING_PAYMENT) {
-      throw new BadRequestException('Esta reserva ya fue confirmada. Si necesitas hacer cambios, comunícate con administración.');
+      throw new BadRequestException(
+        'Esta reserva ya fue confirmada. Si necesitas hacer cambios, comunícate con administración.',
+      );
     }
+    const attendees = this.normalizeReservationAttendees(
+      dto.holderName,
+      dto.attendees,
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockEvent(tx, current.specialEventId);
-      const event = await tx.specialEvent.findUnique({ where: { id: current.specialEventId } });
+      const event = await tx.specialEvent.findUnique({
+        where: { id: current.specialEventId },
+      });
       if (!event || !this.isPubliclyReservable(event)) {
         throw new BadRequestException('Evento no disponible para editar');
       }
 
-      const totals = await this.calculateReservationTotals(tx, event, dto.attendees, current.id);
+      const totals = await this.calculateReservationTotals(
+        tx,
+        event,
+        attendees,
+        current.id,
+      );
 
-      await tx.specialEventTicket.deleteMany({ where: { reservationId: current.id } });
+      await tx.specialEventTicket.deleteMany({
+        where: { reservationId: current.id },
+      });
       await tx.specialEventReservation.update({
         where: { id: current.id },
         data: {
@@ -424,12 +530,16 @@ export class SpecialEventsService {
         },
       });
       await tx.specialEventTicket.createMany({
-        data: dto.attendees.map((attendee, index) => ({
+        data: attendees.map((attendee, index) => ({
           reservationId: current.id,
           code: this.buildTicketCode(current.folioNumber, index),
           attendeeName: attendee.name.trim(),
           attendeeType: attendee.type,
-          price: attendee.type === SpecialEventAttendeeType.CHILD ? event.childPrice : event.adultPrice,
+          isReservationHolder: attendee.isReservationHolder,
+          price:
+            attendee.type === SpecialEventAttendeeType.CHILD
+              ? event.childPrice
+              : event.adultPrice,
         })),
       });
 
@@ -439,13 +549,22 @@ export class SpecialEventsService {
       });
     });
 
+    await this.customersService.linkSpecialEventReservation({
+      reservationId: updated.id,
+      holderName: updated.holderName,
+      holderPhone: updated.holderPhone,
+      holderEmail: updated.holderEmail,
+    });
+
     return this.toReservationResponse(updated, true);
   }
 
   async confirmReservationPayment(id: string, actorUserId: string) {
     const current = await this.getReservationByIdInternal(id);
     if (current.status === SpecialEventReservationStatus.CANCELLED) {
-      throw new BadRequestException('No se puede confirmar una reserva cancelada');
+      throw new BadRequestException(
+        'No se puede confirmar una reserva cancelada',
+      );
     }
 
     const updated = await this.prisma.specialEventReservation.update({
@@ -498,15 +617,16 @@ export class SpecialEventsService {
       include: SPECIAL_RESERVATION_INCLUDE,
     });
 
-    const deliveries = await this.messagingService.resendSpecialEventReservationLink({
-      reservationId: updated.id,
-      holderName: updated.holderName,
-      holderPhone: updated.holderPhone,
-      eventName: updated.specialEvent.name,
-      folio: this.formatFolio(updated.folioNumber),
-      trackingLink: this.buildPublicReservationUrl(token),
-      actorUserId,
-    });
+    const deliveries =
+      await this.messagingService.resendSpecialEventReservationLink({
+        reservationId: updated.id,
+        holderName: updated.holderName,
+        holderPhone: updated.holderPhone,
+        eventName: updated.specialEvent.name,
+        folio: formatSpecialEventFolio(updated.folioNumber),
+        trackingLink: this.buildPublicReservationUrl(token),
+        actorUserId,
+      });
 
     return {
       reservationId: reservation.id,
@@ -518,7 +638,14 @@ export class SpecialEventsService {
   async getFinanceSummary(range: { from?: Date; to?: Date }) {
     const createdWhere = this.whereByCreatedRange(range);
     const confirmedWhere = this.whereByPaymentRange(range);
-    const [expected, confirmed, pending, pendingCount, confirmedCount, cancelledCount] = await this.prisma.$transaction([
+    const [
+      expected,
+      confirmed,
+      pending,
+      pendingCount,
+      confirmedCount,
+      cancelledCount,
+    ] = await this.prisma.$transaction([
       this.prisma.specialEventReservation.aggregate({
         where: {
           ...createdWhere,
@@ -541,20 +668,32 @@ export class SpecialEventsService {
         _sum: { totalAmount: true },
       }),
       this.prisma.specialEventReservation.count({
-        where: { ...createdWhere, status: SpecialEventReservationStatus.PENDING_PAYMENT },
+        where: {
+          ...createdWhere,
+          status: SpecialEventReservationStatus.PENDING_PAYMENT,
+        },
       }),
       this.prisma.specialEventReservation.count({
-        where: { ...createdWhere, status: SpecialEventReservationStatus.PAYMENT_CONFIRMED },
+        where: {
+          ...createdWhere,
+          status: SpecialEventReservationStatus.PAYMENT_CONFIRMED,
+        },
       }),
       this.prisma.specialEventReservation.count({
-        where: { ...createdWhere, status: SpecialEventReservationStatus.CANCELLED },
+        where: {
+          ...createdWhere,
+          status: SpecialEventReservationStatus.CANCELLED,
+        },
       }),
     ]);
 
     return {
-      expectedSpecialEventIncomePeriod: expected._sum.totalAmount?.toNumber() ?? 0,
-      confirmedSpecialEventIncomePeriod: confirmed._sum.totalAmount?.toNumber() ?? 0,
-      pendingSpecialEventIncomePeriod: pending._sum.totalAmount?.toNumber() ?? 0,
+      expectedSpecialEventIncomePeriod:
+        expected._sum.totalAmount?.toNumber() ?? 0,
+      confirmedSpecialEventIncomePeriod:
+        confirmed._sum.totalAmount?.toNumber() ?? 0,
+      pendingSpecialEventIncomePeriod:
+        pending._sum.totalAmount?.toNumber() ?? 0,
       reservationCounts: {
         pendingPayment: pendingCount,
         paymentConfirmed: confirmedCount,
@@ -563,14 +702,19 @@ export class SpecialEventsService {
     };
   }
 
-  private async setInactiveStatus(id: string, status: SpecialEventStatus, actorUserId: string) {
+  private async setInactiveStatus(
+    id: string,
+    status: SpecialEventStatus,
+    actorUserId: string,
+  ) {
     const event = await this.findEventOrThrow(id);
     const activeReservations = await this.countActiveReservations(id);
     let warning: string | null = null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (event.blockedSlotId && activeReservations > 0) {
-        warning = 'El bloqueo se mantiene porque existen reservas especiales activas o pagos asociados.';
+        warning =
+          'El bloqueo se mantiene porque existen reservas especiales activas o pagos asociados.';
       }
 
       const nextEvent = await tx.specialEvent.update({
@@ -613,15 +757,29 @@ export class SpecialEventsService {
       throw new BadRequestException('Horario inválido');
     }
 
-    if (!input.name.trim() || !input.description.trim() || !input.includesText.trim()) {
-      throw new BadRequestException('Nombre, descripción e incluye son requeridos');
+    if (
+      !input.name.trim() ||
+      !input.description.trim() ||
+      !input.includesText.trim()
+    ) {
+      throw new BadRequestException(
+        'Nombre, descripción e incluye son requeridos',
+      );
     }
-    if (input.childPrice < 0 || input.adultPrice < 0 || input.capacityMax <= 0) {
+    if (
+      input.childPrice < 0 ||
+      input.adultPrice < 0 ||
+      input.capacityMax <= 0
+    ) {
       throw new BadRequestException('Precios y cupo inválidos');
     }
   }
 
-  private async ensureCanBlockDate(input: { eventId: string; eventDate: Date; excludeBlockedSlotId?: string }) {
+  private async ensureCanBlockDate(input: {
+    eventId: string;
+    eventDate: Date;
+    excludeBlockedSlotId?: string;
+  }) {
     const [reservations, blockedSlots] = await this.prisma.$transaction([
       this.prisma.reservation.findMany({
         where: {
@@ -634,16 +792,24 @@ export class SpecialEventsService {
       this.prisma.blockedSlot.findMany({
         where: {
           date: input.eventDate,
-          id: input.excludeBlockedSlotId ? { not: input.excludeBlockedSlotId } : undefined,
+          id: input.excludeBlockedSlotId
+            ? { not: input.excludeBlockedSlotId }
+            : undefined,
         },
         select: { id: true, startTime: true, endTime: true },
       }),
     ]);
 
     if (reservations.length > 0) {
-      throw new ConflictException('La fecha ya tiene reservaciones normales activas');
+      throw new ConflictException(
+        'La fecha ya tiene reservaciones normales activas',
+      );
     }
-    if (blockedSlots.some((slot) => rangesOverlap('00:00', '23:59', slot.startTime, slot.endTime))) {
+    if (
+      blockedSlots.some((slot) =>
+        rangesOverlap('00:00', '23:59', slot.startTime, slot.endTime),
+      )
+    ) {
       throw new ConflictException('La fecha ya tiene bloqueos activos');
     }
   }
@@ -657,15 +823,26 @@ export class SpecialEventsService {
     if (attendees.length === 0) {
       throw new BadRequestException('Agrega al menos un asistente');
     }
-    const reservedSeats = await this.countReservedSeats(event.id, tx, excludeReservationId);
+    const reservedSeats = await this.countReservedSeats(
+      event.id,
+      tx,
+      excludeReservationId,
+    );
     if (reservedSeats + attendees.length > event.capacityMax) {
       throw new ConflictException('Evento agotado o sin cupo suficiente');
     }
 
-    const childCount = attendees.filter((attendee) => attendee.type === SpecialEventAttendeeType.CHILD).length;
-    const adultCount = attendees.filter((attendee) => attendee.type === SpecialEventAttendeeType.ADULT).length;
+    const childCount = attendees.filter(
+      (attendee) => attendee.type === SpecialEventAttendeeType.CHILD,
+    ).length;
+    const adultCount = attendees.filter(
+      (attendee) => attendee.type === SpecialEventAttendeeType.ADULT,
+    ).length;
     const totalAmount = Number(
-      (childCount * this.toNumber(event.childPrice) + adultCount * this.toNumber(event.adultPrice)).toFixed(2),
+      (
+        childCount * this.toNumber(event.childPrice) +
+        adultCount * this.toNumber(event.adultPrice)
+      ).toFixed(2),
     );
 
     return {
@@ -675,7 +852,45 @@ export class SpecialEventsService {
     };
   }
 
-  private async countReservedSeats(eventId: string, client: PrismaService | TransactionClient = this.prisma, excludeReservationId?: string) {
+  private normalizeReservationAttendees(
+    holderName: string,
+    attendees: CreateSpecialEventReservationDto['attendees'],
+  ) {
+    const normalizedHolderName = this.normalizeAttendeeName(holderName);
+    const additionalAttendees = attendees.filter(
+      (attendee) =>
+        this.normalizeAttendeeName(attendee.name) !== normalizedHolderName,
+    );
+
+    if (additionalAttendees.length > 499) {
+      throw new BadRequestException(
+        'La reserva admite al titular y hasta 499 asistentes adicionales.',
+      );
+    }
+
+    return [
+      {
+        name: holderName.trim(),
+        type: SpecialEventAttendeeType.ADULT,
+        isReservationHolder: true,
+      },
+      ...additionalAttendees.map((attendee) => ({
+        name: attendee.name.trim(),
+        type: attendee.type,
+        isReservationHolder: false,
+      })),
+    ];
+  }
+
+  private normalizeAttendeeName(value: string) {
+    return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-MX');
+  }
+
+  private async countReservedSeats(
+    eventId: string,
+    client: PrismaService | TransactionClient = this.prisma,
+    excludeReservationId?: string,
+  ) {
     return client.specialEventTicket.count({
       where: {
         reservation: {
@@ -697,7 +912,15 @@ export class SpecialEventsService {
   }
 
   private async eventStats(eventId: string, capacityMax: number) {
-    const [reservedCount, expected, confirmed, pending, pendingCount, confirmedCount, cancelledCount] = await this.prisma.$transaction([
+    const [
+      reservedCount,
+      expected,
+      confirmed,
+      pending,
+      pendingCount,
+      confirmedCount,
+      cancelledCount,
+    ] = await this.prisma.$transaction([
       this.prisma.specialEventTicket.count({
         where: {
           reservation: {
@@ -707,25 +930,43 @@ export class SpecialEventsService {
         },
       }),
       this.prisma.specialEventReservation.aggregate({
-        where: { specialEventId: eventId, status: { in: [...ACTIVE_SPECIAL_RESERVATION_STATUSES] } },
+        where: {
+          specialEventId: eventId,
+          status: { in: [...ACTIVE_SPECIAL_RESERVATION_STATUSES] },
+        },
         _sum: { totalAmount: true },
       }),
       this.prisma.specialEventReservation.aggregate({
-        where: { specialEventId: eventId, status: SpecialEventReservationStatus.PAYMENT_CONFIRMED },
+        where: {
+          specialEventId: eventId,
+          status: SpecialEventReservationStatus.PAYMENT_CONFIRMED,
+        },
         _sum: { totalAmount: true },
       }),
       this.prisma.specialEventReservation.aggregate({
-        where: { specialEventId: eventId, status: SpecialEventReservationStatus.PENDING_PAYMENT },
+        where: {
+          specialEventId: eventId,
+          status: SpecialEventReservationStatus.PENDING_PAYMENT,
+        },
         _sum: { totalAmount: true },
       }),
       this.prisma.specialEventReservation.count({
-        where: { specialEventId: eventId, status: SpecialEventReservationStatus.PENDING_PAYMENT },
+        where: {
+          specialEventId: eventId,
+          status: SpecialEventReservationStatus.PENDING_PAYMENT,
+        },
       }),
       this.prisma.specialEventReservation.count({
-        where: { specialEventId: eventId, status: SpecialEventReservationStatus.PAYMENT_CONFIRMED },
+        where: {
+          specialEventId: eventId,
+          status: SpecialEventReservationStatus.PAYMENT_CONFIRMED,
+        },
       }),
       this.prisma.specialEventReservation.count({
-        where: { specialEventId: eventId, status: SpecialEventReservationStatus.CANCELLED },
+        where: {
+          specialEventId: eventId,
+          status: SpecialEventReservationStatus.CANCELLED,
+        },
       }),
     ]);
 
@@ -778,8 +1019,14 @@ export class SpecialEventsService {
     await tx.$queryRaw`SELECT "id" FROM "SpecialEvent" WHERE "id" = ${eventId} FOR UPDATE`;
   }
 
-  private isPubliclyReservable(event: { status: SpecialEventStatus; eventDate: Date }) {
-    return event.status === SpecialEventStatus.PUBLISHED && event.eventDate >= this.today();
+  private isPubliclyReservable(event: {
+    status: SpecialEventStatus;
+    eventDate: Date;
+  }) {
+    return (
+      event.status === SpecialEventStatus.PUBLISHED &&
+      event.eventDate >= this.today()
+    );
   }
 
   private today() {
@@ -787,11 +1034,7 @@ export class SpecialEventsService {
   }
 
   private buildTicketCode(folioNumber: number, index: number) {
-    return `${this.formatFolio(folioNumber)}-${String(index + 1).padStart(2, '0')}`;
-  }
-
-  private formatFolio(folioNumber: number) {
-    return String(folioNumber).padStart(4, '0');
+    return `${formatSpecialEventTicketPrefix(folioNumber)}-${String(index + 1).padStart(2, '0')}`;
   }
 
   private buildPublicReservationUrl(token: string) {
@@ -799,24 +1042,32 @@ export class SpecialEventsService {
       .getOrThrow<string>('FRONTEND_ORIGIN')
       .split(',')
       .map((origin) => origin.trim())
-      .find((origin) => origin.startsWith('http://') || origin.startsWith('https://'));
+      .find(
+        (origin) =>
+          origin.startsWith('http://') || origin.startsWith('https://'),
+      );
 
     return `${frontendOrigin ?? 'http://localhost:5173'}/special-reservation/${token}`;
   }
 
   private waMeLink(phone: string, text: string) {
     const digits = phone.replace(/\D/g, '');
-    return digits ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : null;
+    return digits
+      ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
+      : null;
   }
 
-  private async trySendSpecialReservationCreated(reservation: SpecialReservationWithInclude, token: string) {
+  private async trySendSpecialReservationCreated(
+    reservation: SpecialReservationWithInclude,
+    token: string,
+  ) {
     try {
       await this.messagingService.sendSpecialEventReservationCreated({
         reservationId: reservation.id,
         holderName: reservation.holderName,
         holderPhone: reservation.holderPhone,
         eventName: reservation.specialEvent.name,
-        folio: this.formatFolio(reservation.folioNumber),
+        folio: formatSpecialEventFolio(reservation.folioNumber),
         trackingLink: this.buildPublicReservationUrl(token),
         eventDate: toIsoDate(reservation.specialEvent.eventDate),
         startTime: reservation.specialEvent.startTime,
@@ -828,14 +1079,17 @@ export class SpecialEventsService {
     }
   }
 
-  private async trySendSpecialPaymentConfirmed(reservation: SpecialReservationWithInclude, actorUserId: string) {
+  private async trySendSpecialPaymentConfirmed(
+    reservation: SpecialReservationWithInclude,
+    actorUserId: string,
+  ) {
     try {
       await this.messagingService.sendSpecialEventPaymentConfirmed({
         reservationId: reservation.id,
         holderName: reservation.holderName,
         holderPhone: reservation.holderPhone,
         eventName: reservation.specialEvent.name,
-        folio: this.formatFolio(reservation.folioNumber),
+        folio: formatSpecialEventFolio(reservation.folioNumber),
         trackingLink: null,
         actorUserId,
       });
@@ -848,7 +1102,10 @@ export class SpecialEventsService {
     return typeof value === 'number' ? value : Number(value.toString());
   }
 
-  private whereByCreatedRange(range: { from?: Date; to?: Date }): Prisma.SpecialEventReservationWhereInput {
+  private whereByCreatedRange(range: {
+    from?: Date;
+    to?: Date;
+  }): Prisma.SpecialEventReservationWhereInput {
     return {
       createdAt:
         range.from || range.to
@@ -860,7 +1117,10 @@ export class SpecialEventsService {
     };
   }
 
-  private whereByPaymentRange(range: { from?: Date; to?: Date }): Prisma.SpecialEventReservationWhereInput {
+  private whereByPaymentRange(range: {
+    from?: Date;
+    to?: Date;
+  }): Prisma.SpecialEventReservationWhereInput {
     return {
       paymentConfirmedAt:
         range.from || range.to
@@ -896,14 +1156,16 @@ export class SpecialEventsService {
     };
   }
 
-  private toReservationResponse(reservation: SpecialReservationWithInclude, includeLinks = false) {
-    const folio = this.formatFolio(reservation.folioNumber);
+  private toReservationResponse(
+    reservation: SpecialReservationWithInclude,
+    includeLinks = false,
+  ) {
+    const folio = formatSpecialEventFolio(reservation.folioNumber);
     const businessWhatsapp =
       this.configService.get<string>('WHATSAPP_BUSINESS_PHONE') ??
       this.configService.get<string>('BUSINESS_WHATSAPP') ??
       '';
-    const whatsappText =
-      `Hola, soy ${reservation.holderName}. Envío comprobante de pago para ${reservation.specialEvent.name}, reserva ${folio}.`;
+    const whatsappText = `Hola, soy ${reservation.holderName}. Envío comprobante de pago para ${reservation.specialEvent.name}, reserva ${folio}.`;
     return {
       id: reservation.id,
       specialEventId: reservation.specialEventId,
@@ -934,12 +1196,14 @@ export class SpecialEventsService {
       paymentConfirmedByUser: reservation.paymentConfirmedByUser,
       cancelledAt: reservation.cancelledAt,
       cancelledByUser: reservation.cancelledByUser,
-      isEditable: reservation.status === SpecialEventReservationStatus.PENDING_PAYMENT,
+      isEditable:
+        reservation.status === SpecialEventReservationStatus.PENDING_PAYMENT,
       tickets: reservation.tickets.map((ticket) => ({
         id: ticket.id,
         code: ticket.code,
         attendeeName: ticket.attendeeName,
         attendeeType: ticket.attendeeType,
+        isReservationHolder: ticket.isReservationHolder,
         price: ticket.price.toNumber(),
       })),
       ...(includeLinks

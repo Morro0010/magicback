@@ -11,6 +11,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { SessionAuthGuard } from './common/guards/session-auth.guard';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { ConfigModule } from './config/config.module';
+import { CustomersModule } from './customers/customers.module';
 import { FinanceModule } from './finance/finance.module';
 import { HealthModule } from './health/health.module';
 import { HistoryModule } from './history/history.module';
@@ -35,14 +36,15 @@ import { UsersModule } from './users/users.module';
     ThrottlerModule.forRoot([
       {
         name: 'default',
-        limit: 100,
-        ttl: 60_000,
+        limit: 200,
+        ttl: 900_000,
       },
     ]),
     PrismaModule,
     CommonModule,
     HealthModule,
     UsersModule,
+    CustomersModule,
     AuthModule,
     ProductsModule,
     InventoryModule,

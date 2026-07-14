@@ -7,7 +7,10 @@ import {
 } from '@prisma/client';
 import { normalizePhoneNumber } from '../common/utils/phone.util';
 import { PrismaService } from '../prisma/prisma.service';
-import type { ListNotificationsQueryDto, NotificationGroup } from './dto/list-notifications-query.dto';
+import type {
+  ListNotificationsQueryDto,
+  NotificationGroup,
+} from './dto/list-notifications-query.dto';
 import { WhatsAppChannelService } from './providers/whatsapp-channel.service';
 
 type CreateNotificationInput = {
@@ -25,18 +28,19 @@ type CreateNotificationInput = {
   };
 };
 
-const NOTIFICATION_GROUP_BY_TYPE: Record<NotificationType, NotificationGroup> = {
-  [NotificationType.NEW_RESERVATION]: 'reservations',
-  [NotificationType.RESERVATION_UPDATED]: 'reservations',
-  [NotificationType.EVENT_UPCOMING]: 'reservations',
-  [NotificationType.PAYMENT_PENDING]: 'payments',
-  [NotificationType.POS_SALE_CREATED]: 'system',
-  [NotificationType.POS_TICKET_WHATSAPP]: 'system',
-  [NotificationType.LOW_STOCK_ALERT]: 'inventory',
-  [NotificationType.SPECIAL_EVENT_RESERVATION_CREATED]: 'reservations',
-  [NotificationType.SPECIAL_EVENT_PAYMENT_CONFIRMED]: 'payments',
-  [NotificationType.SPECIAL_EVENT_LINK_WHATSAPP]: 'reservations',
-};
+const NOTIFICATION_GROUP_BY_TYPE: Record<NotificationType, NotificationGroup> =
+  {
+    [NotificationType.NEW_RESERVATION]: 'reservations',
+    [NotificationType.RESERVATION_UPDATED]: 'reservations',
+    [NotificationType.EVENT_UPCOMING]: 'reservations',
+    [NotificationType.PAYMENT_PENDING]: 'payments',
+    [NotificationType.POS_SALE_CREATED]: 'system',
+    [NotificationType.POS_TICKET_WHATSAPP]: 'system',
+    [NotificationType.LOW_STOCK_ALERT]: 'inventory',
+    [NotificationType.SPECIAL_EVENT_RESERVATION_CREATED]: 'reservations',
+    [NotificationType.SPECIAL_EVENT_PAYMENT_CONFIRMED]: 'payments',
+    [NotificationType.SPECIAL_EVENT_LINK_WHATSAPP]: 'reservations',
+  };
 
 @Injectable()
 export class NotificationsService {
@@ -59,7 +63,9 @@ export class NotificationsService {
       sentAt: Date | null;
     }>;
   }> {
-    const channels = Array.from(new Set(input.channels ?? [NotificationChannel.INTERNAL]));
+    const channels = Array.from(
+      new Set(input.channels ?? [NotificationChannel.INTERNAL]),
+    );
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -68,7 +74,8 @@ export class NotificationsService {
         message: input.message.trim(),
         relatedReservationId: input.relatedReservationId ?? null,
         relatedSaleId: input.relatedSaleId ?? null,
-        relatedSpecialEventReservationId: input.relatedSpecialEventReservationId ?? null,
+        relatedSpecialEventReservationId:
+          input.relatedSpecialEventReservationId ?? null,
       },
     });
 
@@ -121,9 +128,9 @@ export class NotificationsService {
               notificationId: notification.id,
               channel,
               status: NotificationDeliveryStatus.SKIPPED,
-            provider: 'whatsapp',
-            destination: input.whatsapp?.to?.trim() || null,
-            errorMessage: 'Número inválido o ausente para WhatsApp',
+              provider: 'whatsapp',
+              destination: input.whatsapp?.to?.trim() || null,
+              errorMessage: 'Número inválido o ausente para WhatsApp',
               payloadJson: Prisma.JsonNull,
               triggeredByUserId: input.actorUserId ?? null,
             },
@@ -178,9 +185,13 @@ export class NotificationsService {
             payloadJson: {
               text: input.whatsapp?.text?.trim() || notification.message,
               preparedUrl: result.preparedUrl ?? null,
-              mode: result.provider === 'whatsapp_link' ? 'manual_whatsapp_link' : 'provider_send',
+              mode:
+                result.provider === 'whatsapp_link'
+                  ? 'manual_whatsapp_link'
+                  : 'provider_send',
             },
-            sentAt: status === NotificationDeliveryStatus.SENT ? new Date() : null,
+            sentAt:
+              status === NotificationDeliveryStatus.SENT ? new Date() : null,
           },
         });
 
@@ -241,7 +252,8 @@ export class NotificationsService {
       message: notification.message,
       relatedReservationId: notification.relatedReservationId,
       relatedSaleId: notification.relatedSaleId,
-      relatedSpecialEventReservationId: notification.relatedSpecialEventReservationId,
+      relatedSpecialEventReservationId:
+        notification.relatedSpecialEventReservationId,
       isRead: notification.isRead,
       createdAt: notification.createdAt,
       deliveries: notification.deliveries.map((delivery) => ({
@@ -317,6 +329,36 @@ export class NotificationsService {
     return { ok: true };
   }
 
+  async markAllAsRead(userId: string) {
+    const unreadNotifications = await this.prisma.notification.findMany({
+      where: { isRead: false },
+      select: { id: true },
+    });
+
+    if (unreadNotifications.length === 0) {
+      return { ok: true, count: 0 };
+    }
+
+    const notificationIds = unreadNotifications.map(
+      (notification) => notification.id,
+    );
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.notification.updateMany({
+        where: { id: { in: notificationIds }, isRead: false },
+        data: { isRead: true },
+      }),
+      this.prisma.notificationRead.createMany({
+        data: notificationIds.map((notificationId) => ({
+          notificationId,
+          userId,
+        })),
+        skipDuplicates: true,
+      }),
+    ]);
+
+    return { ok: true, count: updated.count };
+  }
+
   async sendNotificationToWhatsApp(
     notificationId: string,
     input: { phone?: string; text?: string; actorUserId: string },
@@ -344,7 +386,8 @@ export class NotificationsService {
       message: notification.message,
       relatedReservationId: notification.relatedReservationId ?? undefined,
       relatedSaleId: notification.relatedSaleId ?? undefined,
-      relatedSpecialEventReservationId: notification.relatedSpecialEventReservationId ?? undefined,
+      relatedSpecialEventReservationId:
+        notification.relatedSpecialEventReservationId ?? undefined,
       channels: [NotificationChannel.INTERNAL, NotificationChannel.WHATSAPP],
       whatsapp: {
         to: input.phone ?? fallbackPhone,
@@ -360,7 +403,8 @@ export class NotificationsService {
     }
 
     const preparedUrl = (payload as { preparedUrl?: unknown }).preparedUrl;
-    return typeof preparedUrl === 'string' && preparedUrl.startsWith('https://wa.me/')
+    return typeof preparedUrl === 'string' &&
+      preparedUrl.startsWith('https://wa.me/')
       ? preparedUrl
       : null;
   }

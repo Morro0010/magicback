@@ -47,7 +47,7 @@ export class AuthController {
   @Post('login')
   @PublicRoute()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 10, ttl: 900_000 } })
   async login(
     @Body() loginDto: LoginDto,
     @Req() req: FastifyRequest,

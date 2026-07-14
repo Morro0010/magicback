@@ -106,69 +106,141 @@ enum SpecialEventAttendeeType {
   ADULT
 }
 
+enum BirthdayFollowUpStatus {
+  PENDING
+  CONTACTED
+  NOT_INTERESTED
+}
+
 model User {
-  id                     String                 @id @default(cuid())
-  name                   String
-  email                  String                 @unique
-  passwordHash           String
-  role                   UserRole
-  isActive               Boolean                @default(true)
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  createdReservations    Reservation[]          @relation("CreatedReservations")
-  updatedReservations    Reservation[]          @relation("UpdatedReservations")
-  reservationHistory     ReservationHistory[]
-  blockedSlots           BlockedSlot[]
-  sessions               Session[]
-  notificationsRead      NotificationRead[]
-  notificationDeliveries NotificationDelivery[] @relation("DeliveryTriggeredBy")
-  auditLogs              AuditLog[]
-  productsCreated        Product[]              @relation("ProductsCreated")
-  productsUpdated        Product[]              @relation("ProductsUpdated")
-  inventoryMovements     InventoryMovement[]
-  sales                  Sale[]
-  purchases              Purchase[]
-  capturedReviews        CustomerReview[]       @relation("CustomerReviewsCaptured")
-  specialEventsCreated   SpecialEvent[]         @relation("SpecialEventsCreated")
-  specialEventsUpdated   SpecialEvent[]         @relation("SpecialEventsUpdated")
-  specialEventPayments   SpecialEventReservation[] @relation("SpecialEventPaymentsConfirmed")
+  id                        String                    @id @default(cuid())
+  name                      String
+  email                     String                    @unique
+  passwordHash              String
+  role                      UserRole
+  isActive                  Boolean                   @default(true)
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  createdReservations       Reservation[]             @relation("CreatedReservations")
+  updatedReservations       Reservation[]             @relation("UpdatedReservations")
+  reservationHistory        ReservationHistory[]
+  blockedSlots              BlockedSlot[]
+  sessions                  Session[]
+  notificationsRead         NotificationRead[]
+  notificationDeliveries    NotificationDelivery[]    @relation("DeliveryTriggeredBy")
+  auditLogs                 AuditLog[]
+  productsCreated           Product[]                 @relation("ProductsCreated")
+  productsUpdated           Product[]                 @relation("ProductsUpdated")
+  inventoryMovements        InventoryMovement[]
+  sales                     Sale[]
+  purchases                 Purchase[]
+  capturedReviews           CustomerReview[]          @relation("CustomerReviewsCaptured")
+  specialEventsCreated      SpecialEvent[]            @relation("SpecialEventsCreated")
+  specialEventsUpdated      SpecialEvent[]            @relation("SpecialEventsUpdated")
+  specialEventPayments      SpecialEventReservation[] @relation("SpecialEventPaymentsConfirmed")
   specialEventCancellations SpecialEventReservation[] @relation("SpecialEventReservationsCancelled")
 }
 
+model Customer {
+  id                       String                    @id @default(cuid())
+  name                     String
+  phone                    String
+  normalizedPhone          String                    @unique
+  email                    String?
+  address                  String?
+  firstSeenAt              DateTime                  @default(now())
+  internalNotes            String?
+  celebrants               Celebrant[]
+  reservations             Reservation[]
+  specialEventReservations SpecialEventReservation[]
+  birthdayFollowUps        BirthdayFollowUp[]
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
+  @@index([name])
+  @@index([phone])
+  @@index([createdAt])
+}
+
+model Celebrant {
+  id                  String             @id @default(cuid())
+  customerId          String
+  name                String
+  birthDate           DateTime
+  sourceReservationId String?
+  customer            Customer           @relation(fields: [customerId], references: [id])
+  sourceReservation   Reservation?       @relation("ReservationCelebrants", fields: [sourceReservationId], references: [id])
+  reservations        Reservation[]      @relation("ReservationPrimaryCelebrant")
+  birthdayFollowUps   BirthdayFollowUp[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@unique([customerId, name, birthDate])
+  @@index([customerId])
+  @@index([birthDate])
+  @@index([sourceReservationId])
+}
+
+model BirthdayFollowUp {
+  id           String                 @id @default(cuid())
+  customerId   String
+  celebrantId  String
+  birthdayYear Int
+  status       BirthdayFollowUpStatus @default(PENDING)
+  notes        String?
+  customer     Customer               @relation(fields: [customerId], references: [id])
+  celebrant    Celebrant              @relation(fields: [celebrantId], references: [id])
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@unique([celebrantId, birthdayYear])
+  @@index([customerId])
+  @@index([status])
+  @@index([birthdayYear])
+}
+
 model Reservation {
-  id                   String               @id @default(cuid())
-  publicTokenHash      String               @unique
-  publicTokenExpiresAt DateTime?
-  celebrantName        String
-  eventFormJson        Json?
-  eventDate            DateTime
-  startTime            String
-  endTime              String
-  attendeesCount       Int
-  packageId            String
-  package              Package              @relation(fields: [packageId], references: [id])
-  theme                String?
-  foodDetails          String?
-  notes                String?
-  status               ReservationStatus    @default(REQUESTED)
-  advanceAmount        Decimal              @default(0) @db.Decimal(10, 2)
-  advancePaymentMethod PaymentMethod?
-  pendingBalance       Decimal              @default(0) @db.Decimal(10, 2)
-  paymentDate          DateTime?
-  editableUntil        DateTime
-  createdByUserId      String
-  updatedByUserId      String?
-  createdByUser        User                 @relation("CreatedReservations", fields: [createdByUserId], references: [id])
-  updatedByUser        User?                @relation("UpdatedReservations", fields: [updatedByUserId], references: [id])
-  cancelledAt          DateTime?
-  histories            ReservationHistory[]
-  notifications        Notification[]
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  id                      String               @id @default(cuid())
+  privateEventFolioNumber Int?                 @unique
+  publicTokenHash         String               @unique
+  publicTokenExpiresAt    DateTime?
+  celebrantName           String
+  eventFormJson           Json?
+  eventDate               DateTime
+  startTime               String
+  endTime                 String
+  attendeesCount          Int
+  packageId               String
+  package                 Package              @relation(fields: [packageId], references: [id])
+  customerId              String?
+  customer                Customer?            @relation(fields: [customerId], references: [id])
+  primaryCelebrantId      String?
+  primaryCelebrant        Celebrant?           @relation("ReservationPrimaryCelebrant", fields: [primaryCelebrantId], references: [id])
+  linkedCelebrants        Celebrant[]          @relation("ReservationCelebrants")
+  theme                   String?
+  foodDetails             String?
+  notes                   String?
+  status                  ReservationStatus    @default(REQUESTED)
+  advanceAmount           Decimal              @default(0) @db.Decimal(10, 2)
+  advancePaymentMethod    PaymentMethod?
+  pendingBalance          Decimal              @default(0) @db.Decimal(10, 2)
+  paymentDate             DateTime?
+  editableUntil           DateTime
+  createdByUserId         String
+  updatedByUserId         String?
+  createdByUser           User                 @relation("CreatedReservations", fields: [createdByUserId], references: [id])
+  updatedByUser           User?                @relation("UpdatedReservations", fields: [updatedByUserId], references: [id])
+  cancelledAt             DateTime?
+  histories               ReservationHistory[]
+  notifications           Notification[]
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
 
   @@index([eventDate, startTime, endTime])
   @@index([status])
   @@index([editableUntil])
+  @@index([customerId])
+  @@index([primaryCelebrantId])
 }
 
 model Package {
@@ -199,34 +271,34 @@ model ReservationHistory {
 }
 
 model BlockedSlot {
-  id              String   @id @default(cuid())
+  id              String        @id @default(cuid())
   date            DateTime
   startTime       String
   endTime         String
   reason          String?
   createdByUserId String
-  createdByUser   User     @relation(fields: [createdByUserId], references: [id])
+  createdByUser   User          @relation(fields: [createdByUserId], references: [id])
   specialEvent    SpecialEvent?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime      @default(now())
 
   @@index([date, startTime, endTime])
 }
 
 model Notification {
-  id                   String                 @id @default(cuid())
-  type                 NotificationType
-  title                String
-  message              String
-  relatedReservationId String?
-  relatedReservation   Reservation?           @relation(fields: [relatedReservationId], references: [id])
-  relatedSaleId        String?
-  relatedSale          Sale?                  @relation(fields: [relatedSaleId], references: [id])
+  id                               String                   @id @default(cuid())
+  type                             NotificationType
+  title                            String
+  message                          String
+  relatedReservationId             String?
+  relatedReservation               Reservation?             @relation(fields: [relatedReservationId], references: [id])
+  relatedSaleId                    String?
+  relatedSale                      Sale?                    @relation(fields: [relatedSaleId], references: [id])
   relatedSpecialEventReservationId String?
   relatedSpecialEventReservation   SpecialEventReservation? @relation(fields: [relatedSpecialEventReservationId], references: [id])
-  isRead               Boolean                @default(false)
-  reads                NotificationRead[]
-  deliveries           NotificationDelivery[]
-  createdAt            DateTime               @default(now())
+  isRead                           Boolean                  @default(false)
+  reads                            NotificationRead[]
+  deliveries                       NotificationDelivery[]
+  createdAt                        DateTime                 @default(now())
 
   @@index([isRead, createdAt])
 }
@@ -299,58 +371,61 @@ model CustomerReview {
 }
 
 model SpecialEvent {
-  id              String             @id @default(cuid())
+  id              String                    @id @default(cuid())
   name            String
   description     String
   eventDate       DateTime
   startTime       String
   endTime         String
-  childPrice      Decimal            @db.Decimal(10, 2)
-  adultPrice      Decimal            @db.Decimal(10, 2)
+  childPrice      Decimal                   @db.Decimal(10, 2)
+  adultPrice      Decimal                   @db.Decimal(10, 2)
   capacityMax     Int
   imageUrl        String?
   includesText    String
-  status          SpecialEventStatus @default(DRAFT)
-  blockedSlotId   String?            @unique
-  blockedSlot     BlockedSlot?       @relation(fields: [blockedSlotId], references: [id])
+  status          SpecialEventStatus        @default(DRAFT)
+  blockedSlotId   String?                   @unique
+  blockedSlot     BlockedSlot?              @relation(fields: [blockedSlotId], references: [id])
   createdByUserId String
   updatedByUserId String?
-  createdByUser   User               @relation("SpecialEventsCreated", fields: [createdByUserId], references: [id])
-  updatedByUser   User?              @relation("SpecialEventsUpdated", fields: [updatedByUserId], references: [id])
+  createdByUser   User                      @relation("SpecialEventsCreated", fields: [createdByUserId], references: [id])
+  updatedByUser   User?                     @relation("SpecialEventsUpdated", fields: [updatedByUserId], references: [id])
   reservations    SpecialEventReservation[]
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
 
   @@index([eventDate, status])
   @@index([status])
 }
 
 model SpecialEventReservation {
-  id                    String                        @id @default(cuid())
-  specialEventId        String
-  folioNumber           Int                           @unique @default(autoincrement())
-  publicTokenHash       String                        @unique
-  holderName            String
-  holderPhone           String
-  holderEmail           String?
-  comments              String?
-  childCount            Int
-  adultCount            Int
-  totalAmount           Decimal                       @db.Decimal(10, 2)
-  status                SpecialEventReservationStatus @default(PENDING_PAYMENT)
-  paymentConfirmedAt    DateTime?
+  id                       String                        @id @default(cuid())
+  specialEventId           String
+  customerId               String?
+  folioNumber              Int                           @unique @default(autoincrement())
+  publicTokenHash          String                        @unique
+  holderName               String
+  holderPhone              String
+  holderEmail              String?
+  comments                 String?
+  childCount               Int
+  adultCount               Int
+  totalAmount              Decimal                       @db.Decimal(10, 2)
+  status                   SpecialEventReservationStatus @default(PENDING_PAYMENT)
+  paymentConfirmedAt       DateTime?
   paymentConfirmedByUserId String?
-  cancelledAt           DateTime?
-  cancelledByUserId     String?
-  specialEvent          SpecialEvent                  @relation(fields: [specialEventId], references: [id])
-  paymentConfirmedByUser User?                        @relation("SpecialEventPaymentsConfirmed", fields: [paymentConfirmedByUserId], references: [id])
-  cancelledByUser       User?                         @relation("SpecialEventReservationsCancelled", fields: [cancelledByUserId], references: [id])
-  tickets               SpecialEventTicket[]
-  notifications         Notification[]
-  createdAt             DateTime                      @default(now())
-  updatedAt             DateTime                      @updatedAt
+  cancelledAt              DateTime?
+  cancelledByUserId        String?
+  specialEvent             SpecialEvent                  @relation(fields: [specialEventId], references: [id])
+  customer                 Customer?                     @relation(fields: [customerId], references: [id])
+  paymentConfirmedByUser   User?                         @relation("SpecialEventPaymentsConfirmed", fields: [paymentConfirmedByUserId], references: [id])
+  cancelledByUser          User?                         @relation("SpecialEventReservationsCancelled", fields: [cancelledByUserId], references: [id])
+  tickets                  SpecialEventTicket[]
+  notifications            Notification[]
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
 
   @@index([specialEventId, status])
+  @@index([customerId])
   @@index([folioNumber])
   @@index([holderName])
   @@index([holderPhone])
@@ -359,16 +434,18 @@ model SpecialEventReservation {
 }
 
 model SpecialEventTicket {
-  id              String                   @id @default(cuid())
-  reservationId   String
-  code            String                   @unique
-  attendeeName    String
-  attendeeType    SpecialEventAttendeeType
-  price           Decimal                  @db.Decimal(10, 2)
-  reservation     SpecialEventReservation  @relation(fields: [reservationId], references: [id])
-  createdAt       DateTime                 @default(now())
+  id                  String                   @id @default(cuid())
+  reservationId       String
+  code                String                   @unique
+  attendeeName        String
+  attendeeType        SpecialEventAttendeeType
+  isReservationHolder Boolean                  @default(false)
+  price               Decimal                  @db.Decimal(10, 2)
+  reservation         SpecialEventReservation  @relation(fields: [reservationId], references: [id])
+  createdAt           DateTime                 @default(now())
 
   @@index([reservationId])
+  @@index([reservationId, isReservationHolder])
 }
 
 model Product {

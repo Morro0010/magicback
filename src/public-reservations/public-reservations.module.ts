@@ -4,6 +4,7 @@ import { ReservationsModule } from '../reservations/reservations.module';
 import { HistoryModule } from '../history/history.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CommonModule } from '../common/common.module';
+import { CustomersModule } from '../customers/customers.module';
 import { PublicReservationsController } from './public-reservations.controller';
 import { PublicReservationsService } from './public-reservations.service';
 
@@ -14,6 +15,7 @@ import { PublicReservationsService } from './public-reservations.service';
     HistoryModule,
     NotificationsModule,
     CommonModule,
+    CustomersModule,
   ],
   controllers: [PublicReservationsController],
   providers: [PublicReservationsService],

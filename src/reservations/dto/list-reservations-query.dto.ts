@@ -5,11 +5,18 @@ import {
   IsEnum,
   IsInt,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 
 export class ListReservationsQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  search?: string;
+
   @IsOptional()
   @IsDateString()
   from?: string;
