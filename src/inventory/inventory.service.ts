@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InventoryMovementType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAdjustmentDto } from './dto/create-adjustment.dto';
@@ -9,6 +13,7 @@ export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listMovements(query: ListInventoryMovementsQueryDto) {
+    const limit = query.limit ?? 25;
     const where: Prisma.InventoryMovementWhereInput = {
       productId: query.productId,
       type: query.type,
@@ -21,29 +26,56 @@ export class InventoryService {
           : undefined,
     };
 
-    const rows = await this.prisma.inventoryMovement.findMany({
-      where,
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            unit: true,
+    const [rowsWithLookahead, grouped, forcedCount] = await Promise.all([
+      this.prisma.inventoryMovement.findMany({
+        where,
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              unit: true,
+            },
+          },
+          actor: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+            },
           },
         },
-        actor: {
-          select: {
-            id: true,
-            name: true,
-            role: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 300,
-    });
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        cursor: query.cursor ? { id: query.cursor } : undefined,
+        skip: query.cursor ? 1 : 0,
+        take: limit + 1,
+      }),
+      this.prisma.inventoryMovement.groupBy({
+        by: ['type'],
+        where,
+        _sum: { quantity: true },
+      }),
+      this.prisma.inventoryMovement.count({
+        where: { ...where, forcedByAdmin: true },
+      }),
+    ]);
+    const hasMore = rowsWithLookahead.length > limit;
+    const rows = hasMore
+      ? rowsWithLookahead.slice(0, limit)
+      : rowsWithLookahead;
+    const entradas = grouped
+      .map((row) => row._sum.quantity ?? 0)
+      .filter((quantity) => quantity > 0)
+      .reduce((sum, quantity) => sum + quantity, 0);
+    const salidas = grouped
+      .map((row) => row._sum.quantity ?? 0)
+      .filter((quantity) => quantity < 0)
+      .reduce((sum, quantity) => sum + Math.abs(quantity), 0);
 
     return {
+      nextCursor: hasMore ? (rows.at(-1)?.id ?? null) : null,
+      hasMore,
+      summary: { entradas, salidas, forcedCount },
       items: rows.map((row) => ({
         id: row.id,
         productId: row.productId,
@@ -67,13 +99,20 @@ export class InventoryService {
 
   async createManualAdjustment(
     dto: CreateAdjustmentDto,
-    actor: { id: string; role: UserRole; ipAddress?: string; userAgent?: string },
+    actor: {
+      id: string;
+      role: UserRole;
+      ipAddress?: string;
+      userAgent?: string;
+    },
   ) {
     if (dto.quantityDelta === 0) {
       throw new BadRequestException('La cantidad del ajuste no puede ser 0');
     }
 
-    const product = await this.prisma.product.findUnique({ where: { id: dto.productId } });
+    const product = await this.prisma.product.findUnique({
+      where: { id: dto.productId },
+    });
     if (!product) {
       throw new NotFoundException('Producto no encontrado');
     }

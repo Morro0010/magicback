@@ -1,4 +1,7 @@
-export function normalizePhoneNumber(raw: string | null | undefined, defaultCountryCode = '52'): string | null {
+export function normalizePhoneNumber(
+  raw: string | null | undefined,
+  defaultCountryCode = '52',
+): string | null {
   if (!raw) {
     return null;
   }
@@ -12,7 +15,10 @@ export function normalizePhoneNumber(raw: string | null | undefined, defaultCoun
     return `+${defaultCountryCode}${digits}`;
   }
 
-  if (digits.length === defaultCountryCode.length + 10 && digits.startsWith(defaultCountryCode)) {
+  if (
+    digits.length === defaultCountryCode.length + 10 &&
+    digits.startsWith(defaultCountryCode)
+  ) {
     return `+${digits}`;
   }
 
@@ -27,7 +33,10 @@ export function normalizePhoneNumber(raw: string | null | undefined, defaultCoun
   return null;
 }
 
-export function isValidPhoneNumber(raw: string | null | undefined, defaultCountryCode = '52'): boolean {
+export function isValidPhoneNumber(
+  raw: string | null | undefined,
+  defaultCountryCode = '52',
+): boolean {
   return normalizePhoneNumber(raw, defaultCountryCode) !== null;
 }
 

@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createWhatsAppLink, normalizePhoneNumber } from '../../common/utils/phone.util';
+import {
+  createWhatsAppLink,
+  normalizePhoneNumber,
+} from '../../common/utils/phone.util';
 
 type WhatsAppSendInput = {
   to: string;
@@ -21,12 +24,19 @@ export class WhatsAppChannelService {
   constructor(private readonly configService: ConfigService) {}
 
   async send(input: WhatsAppSendInput): Promise<WhatsAppSendResult> {
-    const provider = this.configService.get<string>('WHATSAPP_PROVIDER') ?? 'whatsapp_link';
-    const enabled = this.configService.get<string>('WHATSAPP_ENABLED') !== 'false';
-    const defaultCountryCode = this.configService.get<string>('WHATSAPP_DEFAULT_COUNTRY_CODE') ?? '52';
+    const provider =
+      this.configService.get<string>('WHATSAPP_PROVIDER') ?? 'whatsapp_link';
+    const enabled =
+      this.configService.get<string>('WHATSAPP_ENABLED') !== 'false';
+    const defaultCountryCode =
+      this.configService.get<string>('WHATSAPP_DEFAULT_COUNTRY_CODE') ?? '52';
 
     if (provider === 'whatsapp_link') {
-      const preparedUrl = createWhatsAppLink(input.to, input.text, defaultCountryCode);
+      const preparedUrl = createWhatsAppLink(
+        input.to,
+        input.text,
+        defaultCountryCode,
+      );
       const destination = normalizePhoneNumber(input.to, defaultCountryCode);
 
       if (!preparedUrl || !destination) {
@@ -41,7 +51,8 @@ export class WhatsAppChannelService {
         status: 'SKIPPED',
         provider,
         preparedUrl,
-        errorMessage: 'Mensaje preparado para WhatsApp manual; no se envió automáticamente',
+        errorMessage:
+          'Mensaje preparado para WhatsApp manual; no se envió automáticamente',
       };
     }
 
@@ -71,7 +82,9 @@ export class WhatsAppChannelService {
     const apiUrl = this.configService.get<string>('WHATSAPP_API_URL');
     const apiToken = this.configService.get<string>('WHATSAPP_API_TOKEN');
     const from = this.configService.get<string>('WHATSAPP_FROM') ?? '';
-    const timeoutMs = Number(this.configService.get<string>('WHATSAPP_TIMEOUT_MS') ?? 4_000);
+    const timeoutMs = Number(
+      this.configService.get<string>('WHATSAPP_TIMEOUT_MS') ?? 4_000,
+    );
 
     if (!apiUrl || !apiToken) {
       return {

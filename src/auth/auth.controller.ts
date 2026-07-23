@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PublicRoute } from '../common/decorators/public-route.decorator';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request.type';
+import { hashOpaqueToken } from '../common/utils/security.util';
 import { LoginDto } from './dto/login.dto';
 import { AuthService } from './auth.service';
 
@@ -27,8 +28,10 @@ export class AuthController {
   ) {}
 
   private getCookieOptions(): { sameSite: CookieSameSite; secure: boolean } {
-    const isProduction = this.configService.getOrThrow<string>('NODE_ENV') === 'production';
-    const configuredSameSite = this.configService.get<CookieSameSite>('COOKIE_SAME_SITE');
+    const isProduction =
+      this.configService.getOrThrow<string>('NODE_ENV') === 'production';
+    const configuredSameSite =
+      this.configService.get<CookieSameSite>('COOKIE_SAME_SITE');
     const configuredSecure =
       this.configService.get<string>('COOKIE_SECURE') === undefined
         ? isProduction
@@ -42,6 +45,11 @@ export class AuthController {
 
   private isDesktopRequest(req: FastifyRequest): boolean {
     return req.headers['x-magic-desktop'] === 'true';
+  }
+
+  private disableAuthResponseCaching(reply: FastifyReply): void {
+    reply.header('Cache-Control', 'no-store, max-age=0');
+    reply.header('Pragma', 'no-cache');
   }
 
   @Post('login')
@@ -58,10 +66,14 @@ export class AuthController {
       userAgent: req.headers['user-agent'],
     });
 
-    const sessionCookieName = this.configService.getOrThrow<string>('SESSION_COOKIE_NAME');
-    const csrfCookieName = this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
+    const sessionCookieName = this.configService.getOrThrow<string>(
+      'SESSION_COOKIE_NAME',
+    );
+    const csrfCookieName =
+      this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
     const isDesktopRequest = this.isDesktopRequest(req);
     const cookieOptions = this.getCookieOptions();
+    this.disableAuthResponseCaching(reply);
     const cookieReply = reply as FastifyReply & {
       setCookie: (
         name: string,
@@ -102,12 +114,7 @@ export class AuthController {
               csrfToken: result.csrfToken,
             },
           }
-        : {
-            browserAuth: {
-              sessionToken: result.sessionToken,
-              csrfToken: result.csrfToken,
-            },
-          }),
+        : {}),
     };
   }
 
@@ -125,11 +132,18 @@ export class AuthController {
       });
     }
 
-    const sessionCookieName = this.configService.getOrThrow<string>('SESSION_COOKIE_NAME');
-    const csrfCookieName = this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
+    const sessionCookieName = this.configService.getOrThrow<string>(
+      'SESSION_COOKIE_NAME',
+    );
+    const csrfCookieName =
+      this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
     const cookieOptions = this.getCookieOptions();
+    this.disableAuthResponseCaching(reply);
     const cookieReply = reply as FastifyReply & {
-      clearCookie: (name: string, options: Record<string, unknown>) => FastifyReply;
+      clearCookie: (
+        name: string,
+        options: Record<string, unknown>,
+      ) => FastifyReply;
     };
 
     cookieReply.clearCookie(sessionCookieName, {
@@ -150,7 +164,29 @@ export class AuthController {
   }
 
   @Get('me')
-  async me(@CurrentUser() user: { id: string; name: string; email: string; role: string }) {
-    return { user };
+  me(
+    @CurrentUser()
+    user: { id: string; name: string; email: string; role: string },
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    this.disableAuthResponseCaching(reply);
+    const csrfCookieName =
+      this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
+    const csrfToken = req.cookies?.[csrfCookieName]?.trim();
+    const canRestoreCsrfToken =
+      req.session?.client === 'web' &&
+      csrfToken !== undefined &&
+      csrfToken.length > 0 &&
+      hashOpaqueToken(csrfToken) === req.session.csrfTokenHash;
+
+    return {
+      user,
+      session: {
+        inactivityExpiresAt: req.session?.inactivityExpiresAt,
+        absoluteExpiresAt: req.session?.absoluteExpiresAt,
+        ...(canRestoreCsrfToken ? { csrfToken } : {}),
+      },
+    };
   }
 }

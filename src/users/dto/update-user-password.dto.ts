@@ -8,8 +8,7 @@ export class UpdateUserPasswordDto {
   @MinLength(8)
   @MaxLength(128)
   @Matches(STRONG_PASSWORD_REGEX, {
-    message:
-      'password must include upper, lower, number and special character',
+    message: 'password must include upper, lower, number and special character',
   })
   password!: string;
 }

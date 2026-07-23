@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InventoryMovementType, Prisma, UserRole } from '@prisma/client';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,7 +31,17 @@ export class PurchasesService {
   ) {}
 
   async listPurchases(query: ListPurchasesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
     const where: Prisma.PurchaseWhereInput = {
+      OR: search
+        ? [
+            { folio: { contains: search, mode: 'insensitive' } },
+            { supplierName: { contains: search, mode: 'insensitive' } },
+            { reference: { contains: search, mode: 'insensitive' } },
+          ]
+        : undefined,
       createdAt:
         query.from || query.to
           ? {
@@ -37,14 +51,27 @@ export class PurchasesService {
           : undefined,
     };
 
-    const purchases = await this.prisma.purchase.findMany({
-      where,
-      include: PURCHASE_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-      take: 250,
-    });
+    const [total, aggregate, purchases] = await this.prisma.$transaction([
+      this.prisma.purchase.count({ where }),
+      this.prisma.purchase.aggregate({ where, _sum: { totalCost: true } }),
+      this.prisma.purchase.findMany({
+        where,
+        include: {
+          createdByUser: PURCHASE_INCLUDE.createdByUser,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
 
     return {
+      page,
+      limit,
+      total,
+      summary: {
+        totalCost: aggregate._sum.totalCost?.toNumber() ?? 0,
+      },
       items: purchases.map((purchase) => this.toResponse(purchase)),
     };
   }
@@ -64,7 +91,12 @@ export class PurchasesService {
 
   async createPurchase(
     dto: CreatePurchaseDto,
-    actor: { id: string; role: UserRole; ipAddress?: string; userAgent?: string },
+    actor: {
+      id: string;
+      role: UserRole;
+      ipAddress?: string;
+      userAgent?: string;
+    },
   ) {
     if (!dto.items.length) {
       throw new BadRequestException('Debes agregar al menos un producto');
@@ -72,20 +104,24 @@ export class PurchasesService {
 
     const updateProductCost = Boolean(dto.updateProductCost);
     if (updateProductCost && actor.role !== UserRole.ADMIN) {
-      throw new BadRequestException('Solo ADMIN puede cambiar costo base del producto');
+      throw new BadRequestException(
+        'Solo ADMIN puede cambiar costo base del producto',
+      );
     }
 
-    const grouped = dto.items.reduce<Record<string, { quantity: number; unitCostPrice: number }>>(
-      (acc, item) => {
-        if (!acc[item.productId]) {
-          acc[item.productId] = { quantity: 0, unitCostPrice: item.unitCostPrice };
-        }
-        acc[item.productId].quantity += item.quantity;
-        acc[item.productId].unitCostPrice = item.unitCostPrice;
-        return acc;
-      },
-      {},
-    );
+    const grouped = dto.items.reduce<
+      Record<string, { quantity: number; unitCostPrice: number }>
+    >((acc, item) => {
+      if (!acc[item.productId]) {
+        acc[item.productId] = {
+          quantity: 0,
+          unitCostPrice: item.unitCostPrice,
+        };
+      }
+      acc[item.productId].quantity += item.quantity;
+      acc[item.productId].unitCostPrice = item.unitCostPrice;
+      return acc;
+    }, {});
 
     const products = await this.prisma.product.findMany({
       where: { id: { in: Object.keys(grouped) } },
@@ -113,7 +149,9 @@ export class PurchasesService {
       };
     });
 
-    const totalCost = Number(lines.reduce((acc, line) => acc + line.subtotal, 0).toFixed(2));
+    const totalCost = Number(
+      lines.reduce((acc, line) => acc + line.subtotal, 0).toFixed(2),
+    );
     const folio = this.buildFolio();
 
     const createdPurchase = await this.prisma.$transaction(async (tx) => {
@@ -200,7 +238,7 @@ export class PurchasesService {
     totalCost: { toNumber: () => number };
     createdByUserId: string;
     createdByUser: { id: string; name: string; email: string; role: UserRole };
-    items: Array<{
+    items?: Array<{
       id: string;
       purchaseId: string;
       productId: string;
@@ -223,7 +261,7 @@ export class PurchasesService {
       totalCost: purchase.totalCost.toNumber(),
       createdByUserId: purchase.createdByUserId,
       createdByUser: purchase.createdByUser,
-      items: purchase.items.map((item) => ({
+      items: (purchase.items ?? []).map((item) => ({
         id: item.id,
         purchaseId: item.purchaseId,
         productId: item.productId,

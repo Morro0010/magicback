@@ -349,6 +349,47 @@ async function createProducts(adminId: string) {
     },
   ];
 
+  const extraNames = [
+    'Agua mineral',
+    'Té helado',
+    'Néctar infantil',
+    'Refresco familiar',
+    'Galletas decoradas',
+    'Paleta de caramelo',
+    'Chocolate individual',
+    'Gomitas surtidas',
+    'Papas naturales',
+    'Papas con chile',
+    'Nachos individuales',
+    'Pretzels',
+    'Palomitas medianas',
+    'Palomitas grandes',
+    'Combo cine familiar',
+    'Vaso coleccionable',
+    'Calcetines antiderrapantes',
+    'Pulsera Magic',
+    'Corona de cumpleaños',
+    'Bolsa para regalo',
+  ];
+  for (let index = 0; index < 52; index += 1) {
+    const category =
+      Object.values(ProductCategory)[
+        index % Object.values(ProductCategory).length
+      ];
+    const unit =
+      Object.values(ProductUnit)[index % Object.values(ProductUnit).length];
+    products.push({
+      name: `${extraNames[index % extraNames.length]} ${Math.floor(index / extraNames.length) + 1}`,
+      sku: `DEMO-EXTRA-${String(index + 1).padStart(3, '0')}`,
+      category,
+      salePrice: 20 + (index % 12) * 5,
+      costPrice: 8 + (index % 9) * 3,
+      stockMin: 8 + (index % 10),
+      unit,
+      isActive: index % 17 !== 0,
+    });
+  }
+
   return prisma.$transaction(
     products.map((product) =>
       prisma.product.create({
@@ -633,6 +674,7 @@ async function createReservation(input: {
   followUpStatus?: BirthdayFollowUpStatus;
   historyActions?: HistoryActionType[];
   createdAt?: Date;
+  exposePublicLink?: boolean;
 }) {
   const packageRecord = await prisma.package.findUniqueOrThrow({
     where: { id: input.packageId },
@@ -849,10 +891,12 @@ async function createReservation(input: {
     },
   });
 
-  demoPublicLinks.push({
-    label: `Reservación ${input.celebrantName}`,
-    path: `/public/reservations/${token}`,
-  });
+  if (input.exposePublicLink !== false) {
+    demoPublicLinks.push({
+      label: `Reservación ${input.celebrantName}`,
+      path: `/public/reservations/${token}`,
+    });
+  }
 
   return { reservation, token, customerId, celebrantId };
 }
@@ -1385,6 +1429,375 @@ async function createNotificationAndAuditScenarios(input: {
       },
     ],
   });
+}
+
+function seededRandom(seed = 20260722) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
+async function createYearOfNormalOperation(input: {
+  adminId: string;
+  cashierId: string;
+  packageIds: string[];
+  products: Awaited<ReturnType<typeof createProducts>>;
+}) {
+  const random = seededRandom();
+  const activeProducts = input.products.filter((product) => product.isActive);
+  const firstNames = [
+    'Ana',
+    'María',
+    'Laura',
+    'Patricia',
+    'Fernanda',
+    'Claudia',
+    'Gabriela',
+    'Mónica',
+    'Daniela',
+    'Alejandra',
+    'Paola',
+    'Verónica',
+    'Sofía',
+    'Carolina',
+    'Adriana',
+  ];
+  const lastNames = [
+    'García',
+    'Hernández',
+    'Martínez',
+    'López',
+    'González',
+    'Pérez',
+    'Ramírez',
+    'Flores',
+    'Torres',
+    'Rivera',
+    'Navarro',
+    'Vargas',
+  ];
+  const childNames = [
+    'Valentina',
+    'Mateo',
+    'Santiago',
+    'Regina',
+    'Emiliano',
+    'Renata',
+    'Leonardo',
+    'Camila',
+    'Sebastián',
+    'Victoria',
+    'Diego',
+    'Luciana',
+  ];
+  const themes = [
+    'Unicornios',
+    'Dinosaurios',
+    'Espacio',
+    'Superhéroes',
+    'Princesas',
+    'Minecraft',
+    'Safari',
+    'Sirenas',
+    'Fútbol',
+    'Arcoíris',
+  ];
+
+  await createPurchase({
+    folio: 'CMP-YR-APERTURA',
+    supplierName: 'Inventario inicial anual',
+    createdByUserId: input.adminId,
+    createdAt: dateTimeDaysAgo(365, 9),
+    items: activeProducts.map((product) => ({
+      productId: product.id,
+      quantity: 500,
+      unitCostPrice: product.costPrice.toNumber(),
+    })),
+  });
+
+  for (let index = 0; index < 40; index += 1) {
+    const start = (index * 5) % activeProducts.length;
+    const selected = Array.from(
+      { length: 5 },
+      (_, offset) =>
+        activeProducts[(start + offset * 3) % activeProducts.length],
+    );
+    await createPurchase({
+      folio: `CMP-YR-${String(index + 1).padStart(4, '0')}`,
+      supplierName: [
+        'Distribuidora Colima',
+        'Dulcería La Estrella',
+        'Bebidas del Pacífico',
+        'Snack y Fiesta',
+      ][index % 4],
+      createdByUserId: index % 5 === 0 ? input.cashierId : input.adminId,
+      createdAt: dateTimeDaysAgo(350 - index * 8, 8 + (index % 7)),
+      items: selected.map((product, itemIndex) => ({
+        productId: product.id,
+        quantity: 30 + ((index + itemIndex) % 6) * 10,
+        unitCostPrice: product.costPrice.toNumber(),
+      })),
+    });
+  }
+
+  for (let index = 0; index < 540; index += 1) {
+    const lineCount = 1 + Math.floor(random() * 3);
+    const selectedIds = new Set<string>();
+    while (selectedIds.size < lineCount) {
+      selectedIds.add(
+        activeProducts[Math.floor(random() * activeProducts.length)].id,
+      );
+    }
+    await createSale({
+      folio: `VTA-YR-${String(index + 1).padStart(5, '0')}`,
+      createdByUserId: index % 9 === 0 ? input.adminId : input.cashierId,
+      paymentMethod: Object.values(PaymentMethod)[index % 4],
+      customerPhone:
+        index % 4 === 0
+          ? `55${String(70000000 + index).padStart(8, '0')}`
+          : undefined,
+      sendWhatsAppTicket: index % 15 === 0,
+      createdAt: dateTimeDaysAgo(
+        359 - Math.floor((index * 360) / 540),
+        10 + (index % 10),
+      ),
+      items: [...selectedIds].map((productId, itemIndex) => ({
+        productId,
+        quantity: 1 + ((index + itemIndex) % 4),
+      })),
+    });
+  }
+
+  for (let index = 0; index < 156; index += 1) {
+    const daysFromNow = -350 + Math.floor((index * 410) / 156);
+    const isPast = daysFromNow < 0;
+    const status = isPast
+      ? index % 11 === 0
+        ? ReservationStatus.CANCELLED
+        : ReservationStatus.COMPLETED
+      : [
+          ReservationStatus.REQUESTED,
+          ReservationStatus.HELD,
+          ReservationStatus.CONFIRMED,
+          ReservationStatus.PENDING_PAYMENT,
+        ][index % 4];
+    const parentName = `${firstNames[index % firstNames.length]} ${
+      lastNames[Math.floor(index / firstNames.length) % lastNames.length]
+    }`;
+    const celebrantName = `${childNames[index % childNames.length]} ${
+      lastNames[index % lastNames.length]
+    }`;
+    const phone = `31${String(20000000 + index).padStart(8, '0')}`;
+    const createdDaysAgo = Math.max(0, -daysFromNow + 20 + (index % 35));
+    const advanceAmount =
+      status === ReservationStatus.CANCELLED ? 0 : 2500 + (index % 6) * 750;
+
+    await createReservation({
+      packageId: input.packageIds[index % input.packageIds.length],
+      createdByUserId: index % 6 === 0 ? input.adminId : input.cashierId,
+      celebrantName,
+      status,
+      daysFromNow,
+      startTime: index % 2 === 0 ? '11:00' : '16:00',
+      endTime: index % 2 === 0 ? '15:00' : '20:00',
+      attendeesCount: 25 + (index % 55),
+      advanceAmount,
+      paymentMethod: Object.values(PaymentMethod)[index % 4],
+      theme: themes[index % themes.length],
+      exposePublicLink: false,
+      createdAt: dateTimeDaysAgo(createdDaysAgo, 9 + (index % 9)),
+      eventForm: {
+        eventType: EventType.BIRTHDAY_PARTY,
+        requiresInvoice: index % 8 === 0,
+        responsibleName: parentName,
+        celebrantBirthDate: `${2015 + (index % 7)}-${String(
+          1 + (index % 12),
+        ).padStart(2, '0')}-${String(1 + (index % 27)).padStart(2, '0')}`,
+        packageType: [
+          EventPackageType.BASICO,
+          EventPackageType.BASICO_SPA,
+          EventPackageType.BASICO_DECORACION_PREMIUM,
+        ][index % 3],
+        guestCounts: {
+          children: 18 + (index % 35),
+          adults: 7 + (index % 20),
+        },
+        selectedOptions: {
+          freshWaterFlavor:
+            index % 2 === 0
+              ? EventDrinkOption.JAMAICA
+              : EventDrinkOption.HORCHATA,
+          foodOption:
+            index % 3 === 0
+              ? EventFoodOption.PIZZA
+              : EventFoodOption.TACOS_TUXPENOS,
+          cakeProvider: EventCakeProvider.DAIRY_QUEEN,
+          cakeFlavor: index % 2 === 0 ? 'Chocolate' : 'Vainilla',
+        },
+        phone,
+        address: `Colonia demo ${1 + (index % 18)}, Colima`,
+        internalNotes: `Operación anual simulada #${index + 1}.`,
+      },
+    });
+  }
+
+  const reviewRows: Prisma.CustomerReviewCreateManyInput[] = [];
+  for (let index = 0; index < 120; index += 1) {
+    const base = 3 + (index % 3);
+    const ratings = {
+      cumplimientoHorarioServicio: Math.min(5, base),
+      amabilidadDisponibilidadStaff: Math.min(5, base + 1),
+      lugarLimpio: Math.min(5, 4 + (index % 2)),
+      calidadProductosServicio: Math.min(5, base),
+      instalacionAdecuadaFiestas: Math.min(5, base + 1),
+      comidaTiempoForma: Math.max(2, base - (index % 4 === 0 ? 1 : 0)),
+      recomendariaMagicCity: Math.min(5, base + 1),
+      satisfaccionGeneral: Math.min(5, base),
+    };
+    reviewRows.push({
+      customerName: `${firstNames[index % firstNames.length]} ${
+        lastNames[index % lastNames.length]
+      }`,
+      ...ratings,
+      recommendations:
+        index % 5 === 0
+          ? 'Mantener la atención y mejorar ligeramente los tiempos de alimentos.'
+          : null,
+      averageRating: money(reviewAverage(ratings)),
+      metadataJson: {
+        captureSurface: 'review_tablet',
+        seed: true,
+        annual: true,
+      },
+      capturedByUserId: index % 7 === 0 ? input.adminId : input.cashierId,
+      createdAt: dateTimeDaysAgo(355 - Math.floor((index * 350) / 120), 12),
+    });
+  }
+  await prisma.customerReview.createMany({ data: reviewRows });
+
+  for (let index = 0; index < 30; index += 1) {
+    const daysFromNow = -280 + index * 14;
+    const status =
+      daysFromNow >= 0
+        ? index % 5 === 0
+          ? SpecialEventStatus.DRAFT
+          : SpecialEventStatus.PUBLISHED
+        : index % 9 === 0
+          ? SpecialEventStatus.CANCELLED
+          : SpecialEventStatus.CLOSED;
+    const event = await prisma.specialEvent.create({
+      data: {
+        name: `Experiencia temática ${String(index + 1).padStart(2, '0')}`,
+        description:
+          'Evento anual simulado con actividades, alimentos y acceso por boleto.',
+        eventDate: plusDays(daysFromNow),
+        startTime: index % 2 === 0 ? '11:00' : '16:00',
+        endTime: index % 2 === 0 ? '14:00' : '19:00',
+        childPrice: money(220 + (index % 4) * 30),
+        adultPrice: money(120 + (index % 3) * 20),
+        capacityMax: 90 + (index % 4) * 20,
+        includesText: 'Acceso a juegos\nActividad temática\nSnack infantil',
+        status,
+        createdByUserId: input.adminId,
+        updatedByUserId: input.adminId,
+        createdAt: dateTimeDaysAgo(Math.max(0, -daysFromNow + 40), 10),
+      },
+    });
+
+    const reservationCount = 4 + (index % 6);
+    for (
+      let reservationIndex = 0;
+      reservationIndex < reservationCount;
+      reservationIndex += 1
+    ) {
+      const holderIndex = index * 10 + reservationIndex;
+      const holderName = `${firstNames[holderIndex % firstNames.length]} ${
+        lastNames[holderIndex % lastNames.length]
+      }`;
+      const holderPhone = `33${String(40000000 + holderIndex).padStart(8, '0')}`;
+      const customer = await upsertDemoCustomer({
+        name: holderName,
+        phone: holderPhone,
+      });
+      const reservationStatus =
+        reservationIndex % 7 === 0
+          ? SpecialEventReservationStatus.CANCELLED
+          : reservationIndex % 3 === 0
+            ? SpecialEventReservationStatus.PENDING_PAYMENT
+            : SpecialEventReservationStatus.PAYMENT_CONFIRMED;
+      const childCount = 1 + (reservationIndex % 4);
+      const adultCount = 1 + (reservationIndex % 2);
+      const token = generateOpaqueToken(32);
+      const createdAt = dateTimeDaysAgo(
+        Math.max(0, -daysFromNow + 25 - reservationIndex),
+        11 + (reservationIndex % 6),
+      );
+      await prisma.specialEventReservation.create({
+        data: {
+          specialEventId: event.id,
+          customerId: customer.id,
+          publicTokenHash: hashOpaqueToken(token),
+          holderName,
+          holderPhone,
+          holderEmail: `cliente${holderIndex}@demo.local`,
+          childCount,
+          adultCount,
+          totalAmount: money(
+            childCount * event.childPrice.toNumber() +
+              adultCount * event.adultPrice.toNumber(),
+          ),
+          status: reservationStatus,
+          paymentConfirmedAt:
+            reservationStatus ===
+            SpecialEventReservationStatus.PAYMENT_CONFIRMED
+              ? createdAt
+              : null,
+          paymentConfirmedByUserId:
+            reservationStatus ===
+            SpecialEventReservationStatus.PAYMENT_CONFIRMED
+              ? input.adminId
+              : null,
+          cancelledAt:
+            reservationStatus === SpecialEventReservationStatus.CANCELLED
+              ? createdAt
+              : null,
+          cancelledByUserId:
+            reservationStatus === SpecialEventReservationStatus.CANCELLED
+              ? input.adminId
+              : null,
+          createdAt,
+          tickets: {
+            create: Array.from(
+              { length: childCount + adultCount },
+              (_, ticketIndex) => {
+                const isChild = ticketIndex < childCount;
+                return {
+                  code: `YR-${String(index + 1).padStart(2, '0')}-${String(
+                    reservationIndex + 1,
+                  ).padStart(
+                    2,
+                    '0',
+                  )}-${String(ticketIndex + 1).padStart(2, '0')}`,
+                  attendeeName:
+                    ticketIndex === 0
+                      ? holderName
+                      : `${childNames[(holderIndex + ticketIndex) % childNames.length]} Invitado`,
+                  attendeeType: isChild
+                    ? SpecialEventAttendeeType.CHILD
+                    : SpecialEventAttendeeType.ADULT,
+                  isReservationHolder: ticketIndex === 0,
+                  price: isChild ? event.childPrice : event.adultPrice,
+                  createdAt,
+                };
+              },
+            ),
+          },
+        },
+      });
+    }
+  }
 }
 
 function assertEnumCoverage<T extends string>(
@@ -2036,6 +2449,12 @@ async function main() {
 
   await createCustomerReviews({ adminId: admin.id, cashierId: cashier.id });
   await createSpecialEvents({ adminId: admin.id });
+  await createYearOfNormalOperation({
+    adminId: admin.id,
+    cashierId: cashier.id,
+    packageIds: packages.map((packageRecord) => packageRecord.id),
+    products,
+  });
   await prisma.customer.update({
     where: { normalizedPhone: '5551234567' },
     data: {

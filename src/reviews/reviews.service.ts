@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
@@ -42,7 +46,10 @@ type ReviewWithUser = Prisma.CustomerReviewGetPayload<{
 type ReviewRatingValues = Record<ReviewRatingField, number>;
 
 export function calculateReviewAverage(ratings: ReviewRatingValues) {
-  const total = REVIEW_RATING_FIELDS.reduce((sum, field) => sum + ratings[field], 0);
+  const total = REVIEW_RATING_FIELDS.reduce(
+    (sum, field) => sum + ratings[field],
+    0,
+  );
   return Math.round((total / REVIEW_RATING_FIELDS.length) * 100) / 100;
 }
 
@@ -54,7 +61,10 @@ function decimalToNumber(value: Prisma.Decimal | number | null | undefined) {
   return typeof value === 'number' ? value : value.toNumber();
 }
 
-function parseDateBoundary(value: string | undefined, boundary: 'start' | 'end') {
+function parseDateBoundary(
+  value: string | undefined,
+  boundary: 'start' | 'end',
+) {
   if (!value) {
     return undefined;
   }
@@ -208,14 +218,18 @@ export class ReviewsService {
     };
   }
 
-  private pickRatings(dto: Pick<CreateReviewDto, ReviewRatingField>): ReviewRatingValues {
+  private pickRatings(
+    dto: Pick<CreateReviewDto, ReviewRatingField>,
+  ): ReviewRatingValues {
     return REVIEW_RATING_FIELDS.reduce((ratings, field) => {
       ratings[field] = dto[field];
       return ratings;
     }, {} as ReviewRatingValues);
   }
 
-  private buildWhere(query: ListReviewsQueryDto): Prisma.CustomerReviewWhereInput {
+  private buildWhere(
+    query: ListReviewsQueryDto,
+  ): Prisma.CustomerReviewWhereInput {
     return {
       customerName: query.search
         ? {
@@ -241,8 +255,14 @@ export class ReviewsService {
   }
 
   private assertAverageRange(query: ListReviewsQueryDto) {
-    if (query.minAverage && query.maxAverage && query.minAverage > query.maxAverage) {
-      throw new BadRequestException('El promedio mínimo no puede ser mayor al máximo');
+    if (
+      query.minAverage &&
+      query.maxAverage &&
+      query.minAverage > query.maxAverage
+    ) {
+      throw new BadRequestException(
+        'El promedio mínimo no puede ser mayor al máximo',
+      );
     }
   }
 

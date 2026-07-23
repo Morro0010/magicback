@@ -24,7 +24,8 @@
     "db:seed": "prisma db seed",
     "db:demo:reset": "node dist/prisma/seed-demo-data.js",
     "db:demo:reset:dev": "ts-node prisma/seed-demo-data.ts",
-    "db:deploy": "prisma migrate deploy",
+    "db:indexes": "node prisma/create-online-indexes.cjs",
+    "db:deploy": "prisma migrate deploy && npm run db:indexes",
     "openapi:json": "ts-node src/openapi.ts"
   },
   "dependencies": {

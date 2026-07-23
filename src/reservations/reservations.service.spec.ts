@@ -14,7 +14,9 @@ describe('ReservationsService', () => {
   const notificationsService = { createNotification: jest.fn() } as any;
   const historyService = { createEntry: jest.fn() } as any;
   const auditService = { log: jest.fn() } as any;
-  const configService = { getOrThrow: jest.fn(() => 'http://localhost:5173') } as any;
+  const configService = {
+    getOrThrow: jest.fn(() => 'http://localhost:5173'),
+  } as any;
 
   const service = new ReservationsService(
     prisma,

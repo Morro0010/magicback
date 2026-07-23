@@ -2,7 +2,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
@@ -34,7 +37,8 @@ async function bootstrap() {
   registerScannerBlocker(fastify);
 
   const configService = app.get(ConfigService);
-  const isProduction = configService.getOrThrow<string>('NODE_ENV') === 'production';
+  const isProduction =
+    configService.getOrThrow<string>('NODE_ENV') === 'production';
   const frontendOrigin = configService.getOrThrow<string>('FRONTEND_ORIGIN');
   const frontendOrigins = frontendOrigin
     .split(',')
@@ -43,7 +47,9 @@ async function bootstrap() {
   const localDevelopmentOrigins = isProduction
     ? []
     : ['http://localhost:5173', 'http://127.0.0.1:5173'];
-  const allowedOrigins = [...new Set([...frontendOrigins, ...localDevelopmentOrigins])];
+  const allowedOrigins = [
+    ...new Set([...frontendOrigins, ...localDevelopmentOrigins]),
+  ];
   const cspConnectSources = frontendOrigins.flatMap((origin) => {
     if (origin === 'null') {
       return [];
@@ -98,22 +104,33 @@ async function bootstrap() {
 
       if (
         allowedOrigins.includes(normalizedOrigin) ||
-        (normalizedOrigin.startsWith('file://') && frontendOrigins.includes('file://')) ||
-        (normalizedOrigin === 'null' && (frontendOrigins.includes('file://') || frontendOrigins.includes('null')))
+        (normalizedOrigin.startsWith('file://') &&
+          frontendOrigins.includes('file://')) ||
+        (normalizedOrigin === 'null' &&
+          (frontendOrigins.includes('file://') ||
+            frontendOrigins.includes('null')))
       ) {
         callback(null, true);
         return;
       }
 
-      app.getHttpAdapter().getInstance().log.warn(
-        { origin: normalizedOrigin, allowedOrigins },
-        'CORS origin rejected',
-      );
+      app
+        .getHttpAdapter()
+        .getInstance()
+        .log.warn(
+          { origin: normalizedOrigin, allowedOrigins },
+          'CORS origin rejected',
+        );
       callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-CSRF-Token', 'X-Magic-Desktop'],
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'X-CSRF-Token',
+      'X-Magic-Desktop',
+    ],
   });
 
   app.setGlobalPrefix('api/v1');
@@ -139,10 +156,12 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const prismaService = app.get(PrismaService);
-  await prismaService.enableShutdownHooks(app);
+  await prismaService.enableShutdownHooks();
 
   const port = configService.getOrThrow<number>('PORT');
-  const host = configService.get<string>('HOST') ?? (isProduction ? '0.0.0.0' : '127.0.0.1');
+  const host =
+    configService.get<string>('HOST') ??
+    (isProduction ? '0.0.0.0' : '127.0.0.1');
   await app.listen(port, host);
 }
 

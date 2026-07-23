@@ -26,6 +26,12 @@ export class NotificationsController {
     return this.notificationsService.listNotifications(query);
   }
 
+  @Get('summary')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER)
+  getSummary() {
+    return this.notificationsService.getNotificationSummary();
+  }
+
   @Patch('read-all')
   @Roles(UserRole.ADMIN, UserRole.CASHIER)
   markAllRead(@CurrentUser() user: { id: string }) {

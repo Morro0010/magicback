@@ -1,13 +1,13 @@
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
-import { generateOpaqueToken, hashOpaqueToken } from '../common/utils/security.util';
+import {
+  generateOpaqueToken,
+  hashOpaqueToken,
+} from '../common/utils/security.util';
 import { AuditService } from '../common/services/audit.service';
 
 @Injectable()
@@ -48,7 +48,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordValid = await argon2.verify(user.passwordHash, input.password);
+    const isPasswordValid = await argon2.verify(
+      user.passwordHash,
+      input.password,
+    );
     if (!isPasswordValid) {
       await this.auditService.log({
         eventType: 'AUTH_LOGIN_FAILED',
@@ -60,11 +63,19 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Regenerate session by deactivating any active sessions for this user.
+    const now = new Date();
+
+    // Keep independent browser/device sessions active. Only retire sessions
+    // that have already expired; logging in elsewhere must not revoke a
+    // healthy session without an explicit logout or security event.
     await this.prisma.session.updateMany({
       where: {
         userId: user.id,
         isActive: true,
+        OR: [
+          { inactivityExpiresAt: { lte: now } },
+          { absoluteExpiresAt: { lte: now } },
+        ],
       },
       data: {
         isActive: false,
@@ -74,7 +85,6 @@ export class AuthService {
     const sessionToken = generateOpaqueToken(32);
     const csrfToken = generateOpaqueToken(24);
 
-    const now = new Date();
     const inactivityWindowMinutes = this.configService.getOrThrow<number>(
       'SESSION_INACTIVITY_TIMEOUT_MINUTES',
     );
@@ -85,7 +95,9 @@ export class AuthService {
     const inactivityExpiresAt = new Date(
       now.getTime() + inactivityWindowMinutes * 60 * 1000,
     );
-    const absoluteExpiresAt = new Date(now.getTime() + absoluteWindowHours * 60 * 60 * 1000);
+    const absoluteExpiresAt = new Date(
+      now.getTime() + absoluteWindowHours * 60 * 60 * 1000,
+    );
 
     await this.prisma.session.create({
       data: {

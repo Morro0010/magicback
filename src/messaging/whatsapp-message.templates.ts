@@ -1,5 +1,3 @@
-import type { PaymentMethod } from '@prisma/client';
-
 function formatMoney(value: number) {
   return `$${value.toFixed(2)}`;
 }
@@ -69,8 +67,12 @@ export function specialEventReservationCreatedTemplate(input: {
     '',
     `Folio de reserva: ${input.folio}`,
     input.eventDate ? `Fecha: ${input.eventDate}` : null,
-    input.startTime && input.endTime ? `Horario: ${input.startTime} - ${input.endTime}` : null,
-    input.total !== undefined ? `Total a pagar: ${formatMoney(input.total)}` : null,
+    input.startTime && input.endTime
+      ? `Horario: ${input.startTime} - ${input.endTime}`
+      : null,
+    input.total !== undefined
+      ? `Total a pagar: ${formatMoney(input.total)}`
+      : null,
     '',
     'Puedes consultar tus boletos y el estado de tu reserva aquí:',
     input.trackingLink,
@@ -102,7 +104,7 @@ export function specialEventPaymentConfirmedTemplate(input: {
 export function posTicketTemplate(input: {
   folio: string;
   total: number;
-  paymentMethod?: PaymentMethod | string;
+  paymentMethod?: string;
   ticketLink?: string | null;
 }) {
   return [
@@ -111,7 +113,9 @@ export function posTicketTemplate(input: {
     `Folio de venta: ${input.folio}`,
     `Total: ${formatMoney(input.total)}`,
     input.paymentMethod ? `Pago: ${input.paymentMethod}` : null,
-    ...(input.ticketLink ? ['', 'Puedes consultar tu ticket aquí:', input.ticketLink] : []),
+    ...(input.ticketLink
+      ? ['', 'Puedes consultar tu ticket aquí:', input.ticketLink]
+      : []),
     '',
     '¡Gracias por tu visita!',
   ]

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -39,7 +47,10 @@ export class ProductsController {
 
   @Post()
   @Roles(UserRole.ADMIN)
-  createProduct(@Body() dto: CreateProductDto, @CurrentUser() user: { id: string }) {
+  createProduct(
+    @Body() dto: CreateProductDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.productsService.createProduct(dto, user.id);
   }
 
@@ -60,6 +71,10 @@ export class ProductsController {
     @Body() body: SetProductActiveDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.productsService.setProductActive(params.id, body.isActive, user.id);
+    return this.productsService.setProductActive(
+      params.id,
+      body.isActive,
+      user.id,
+    );
   }
 }

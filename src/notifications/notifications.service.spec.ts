@@ -93,8 +93,16 @@ describe('NotificationsService', () => {
       actorUserId: 'u1',
     });
 
-    expect(result.deliveries.some((delivery) => delivery.channel === NotificationChannel.INTERNAL)).toBe(true);
-    expect(result.deliveries.some((delivery) => delivery.status === NotificationDeliveryStatus.SENT)).toBe(true);
+    expect(
+      result.deliveries.some(
+        (delivery) => delivery.channel === NotificationChannel.INTERNAL,
+      ),
+    ).toBe(true);
+    expect(
+      result.deliveries.some(
+        (delivery) => delivery.status === NotificationDeliveryStatus.SENT,
+      ),
+    ).toBe(true);
     expect(whatsAppChannelService.send).toHaveBeenCalled();
   });
 
@@ -167,7 +175,9 @@ describe('NotificationsService', () => {
       actorUserId: 'u1',
     });
 
-    expect(result.deliveries[0].status).toBe(NotificationDeliveryStatus.SKIPPED);
+    expect(result.deliveries[0].status).toBe(
+      NotificationDeliveryStatus.SKIPPED,
+    );
     expect(whatsAppChannelService.send).not.toHaveBeenCalled();
   });
 });

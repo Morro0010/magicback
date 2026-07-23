@@ -8,9 +8,14 @@ describe('phone.util', () => {
   });
 
   it('creates encoded wa.me links', () => {
-    const link = createWhatsAppLink('55-1234-5678', 'Hola Magic City\nPago confirmado');
+    const link = createWhatsAppLink(
+      '55-1234-5678',
+      'Hola Magic City\nPago confirmado',
+    );
 
-    expect(link).toBe('https://wa.me/525512345678?text=Hola%20Magic%20City%0APago%20confirmado');
+    expect(link).toBe(
+      'https://wa.me/525512345678?text=Hola%20Magic%20City%0APago%20confirmado',
+    );
   });
 
   it('returns null when phone or message is invalid', () => {

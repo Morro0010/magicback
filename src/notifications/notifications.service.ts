@@ -216,6 +216,7 @@ export class NotificationsService {
   }
 
   async listNotifications(query: ListNotificationsQueryDto = {}) {
+    const limit = query.limit ?? 25;
     const where: Prisma.NotificationWhereInput = {
       isRead:
         query.status === 'read'
@@ -233,41 +234,74 @@ export class NotificationsService {
           : undefined,
     };
 
-    const notifications = await this.prisma.notification.findMany({
+    const notificationsWithLookahead = await this.prisma.notification.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      cursor: query.cursor ? { id: query.cursor } : undefined,
+      skip: query.cursor ? 1 : 0,
+      take: limit + 1,
       include: {
         deliveries: {
           orderBy: { createdAt: 'desc' },
+          take: 3,
         },
       },
     });
+    const hasMore = notificationsWithLookahead.length > limit;
+    const notifications = hasMore
+      ? notificationsWithLookahead.slice(0, limit)
+      : notificationsWithLookahead;
 
-    return notifications.map((notification) => ({
-      id: notification.id,
-      type: notification.type,
-      group: NOTIFICATION_GROUP_BY_TYPE[notification.type],
-      title: notification.title,
-      message: notification.message,
-      relatedReservationId: notification.relatedReservationId,
-      relatedSaleId: notification.relatedSaleId,
-      relatedSpecialEventReservationId:
-        notification.relatedSpecialEventReservationId,
-      isRead: notification.isRead,
-      createdAt: notification.createdAt,
-      deliveries: notification.deliveries.map((delivery) => ({
-        id: delivery.id,
-        channel: delivery.channel,
-        status: delivery.status,
-        provider: delivery.provider,
-        destination: delivery.destination,
-        errorMessage: delivery.errorMessage,
-        preparedUrl: this.extractPreparedUrl(delivery.payloadJson),
-        sentAt: delivery.sentAt,
-        createdAt: delivery.createdAt,
+    return {
+      nextCursor: hasMore ? (notifications.at(-1)?.id ?? null) : null,
+      hasMore,
+      items: notifications.map((notification) => ({
+        id: notification.id,
+        type: notification.type,
+        group: NOTIFICATION_GROUP_BY_TYPE[notification.type],
+        title: notification.title,
+        message: notification.message,
+        relatedReservationId: notification.relatedReservationId,
+        relatedSaleId: notification.relatedSaleId,
+        relatedSpecialEventReservationId:
+          notification.relatedSpecialEventReservationId,
+        isRead: notification.isRead,
+        createdAt: notification.createdAt,
+        deliveries: notification.deliveries.map((delivery) => ({
+          id: delivery.id,
+          channel: delivery.channel,
+          status: delivery.status,
+          provider: delivery.provider,
+          destination: delivery.destination,
+          errorMessage: delivery.errorMessage,
+          preparedUrl: this.extractPreparedUrl(delivery.payloadJson),
+          sentAt: delivery.sentAt,
+          createdAt: delivery.createdAt,
+        })),
       })),
-    }));
+    };
+  }
+
+  async getNotificationSummary() {
+    const grouped = await this.prisma.notification.groupBy({
+      by: ['isRead', 'type'],
+      _count: { _all: true },
+    });
+
+    return grouped.reduce(
+      (summary, row) => {
+        const count = row._count._all;
+        summary.total += count;
+        if (!row.isRead) {
+          summary.unread += count;
+        }
+        if (NOTIFICATION_GROUP_BY_TYPE[row.type] === 'inventory') {
+          summary.inventory += count;
+        }
+        return summary;
+      },
+      { total: 0, unread: 0, inventory: 0 },
+    );
   }
 
   async markAsRead(notificationId: string, userId: string) {

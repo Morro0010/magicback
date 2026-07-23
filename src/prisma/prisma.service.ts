@@ -1,4 +1,4 @@
-import { INestApplication, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 
 @Injectable()
@@ -14,7 +14,7 @@ export class PrismaService
     await this.$disconnect();
   }
 
-  async enableShutdownHooks(_app: INestApplication): Promise<void> {
+  async enableShutdownHooks(): Promise<void> {
     // Prisma v6 handles process shutdown reliably once Nest closes.
     return Promise.resolve();
   }

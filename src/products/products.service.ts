@@ -10,6 +10,8 @@ export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listProducts(query: ListProductsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
     const where: Prisma.ProductWhereInput = {
       category: query.category,
       isActive: query.isActive,
@@ -21,16 +23,45 @@ export class ProductsService {
         : undefined,
     };
 
-    const products = await this.prisma.product.findMany({
-      where,
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-    });
+    if (query.lowStockOnly) {
+      const lowStockWhere: Prisma.ProductWhereInput = {
+        ...where,
+        stockMin: { not: null },
+        stockCurrent: { lte: this.prisma.product.fields.stockMin },
+      };
+      const [total, products] = await this.prisma.$transaction([
+        this.prisma.product.count({ where: lowStockWhere }),
+        this.prisma.product.findMany({
+          where: lowStockWhere,
+          orderBy: [{ stockCurrent: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+      ]);
 
-    const mapped = products.map((product) => this.toResponse(product));
+      return {
+        page,
+        limit,
+        total,
+        items: products.map((product) => this.toResponse(product)),
+      };
+    }
+
+    const [total, products] = await this.prisma.$transaction([
+      this.prisma.product.count({ where }),
+      this.prisma.product.findMany({
+        where,
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
     return {
-      items: query.lowStockOnly
-        ? mapped.filter((product) => product.stockMin !== null && product.stockCurrent <= product.stockMin)
-        : mapped,
+      page,
+      limit,
+      total,
+      items: products.map((product) => this.toResponse(product)),
     };
   }
 
@@ -76,7 +107,10 @@ export class ProductsService {
         name: dto.name?.trim(),
         sku: dto.sku !== undefined ? dto.sku.trim() || null : undefined,
         category: dto.category,
-        description: dto.description !== undefined ? dto.description.trim() || null : undefined,
+        description:
+          dto.description !== undefined
+            ? dto.description.trim() || null
+            : undefined,
         salePrice: dto.salePrice,
         costPrice: dto.costPrice,
         stockCurrent: dto.stockCurrent,
@@ -142,7 +176,8 @@ export class ProductsService {
       stockMin: product.stockMin,
       isActive: product.isActive,
       unit: product.unit,
-      isLowStock: product.stockMin !== null && product.stockCurrent <= product.stockMin,
+      isLowStock:
+        product.stockMin !== null && product.stockCurrent <= product.stockMin,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     };

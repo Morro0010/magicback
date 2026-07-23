@@ -1,4 +1,8 @@
-import { compareOpaqueToken, generateOpaqueToken, hashOpaqueToken } from './security.util';
+import {
+  compareOpaqueToken,
+  generateOpaqueToken,
+  hashOpaqueToken,
+} from './security.util';
 
 describe('security.util', () => {
   it('generates unique random opaque tokens', () => {

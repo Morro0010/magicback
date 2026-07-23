@@ -35,7 +35,9 @@ export class BlockedSlotsService {
     );
 
     if (hasOverlap) {
-      throw new ConflictException('Blocked slot overlaps an existing blocked slot');
+      throw new ConflictException(
+        'Blocked slot overlaps an existing blocked slot',
+      );
     }
 
     const blocked = await this.prisma.blockedSlot.create({
@@ -67,7 +69,9 @@ export class BlockedSlotsService {
       throw new NotFoundException('Blocked slot not found');
     }
     if (existing.specialEvent) {
-      throw new BadRequestException('Este bloqueo pertenece a un evento especial. Adminístralo desde Eventos especiales.');
+      throw new BadRequestException(
+        'Este bloqueo pertenece a un evento especial. Adminístralo desde Eventos especiales.',
+      );
     }
 
     const date = dto.date ? parseEventDate(dto.date) : existing.date;
@@ -91,7 +95,9 @@ export class BlockedSlotsService {
       rangesOverlap(startTime, endTime, slot.startTime, slot.endTime),
     );
     if (hasOverlap) {
-      throw new ConflictException('Blocked slot overlaps an existing blocked slot');
+      throw new ConflictException(
+        'Blocked slot overlaps an existing blocked slot',
+      );
     }
 
     const updated = await this.prisma.blockedSlot.update({
@@ -100,7 +106,8 @@ export class BlockedSlotsService {
         date,
         startTime,
         endTime,
-        reason: dto.reason === undefined ? undefined : dto.reason?.trim() || null,
+        reason:
+          dto.reason === undefined ? undefined : dto.reason?.trim() || null,
       },
     });
 
@@ -142,7 +149,9 @@ export class BlockedSlotsService {
       throw new NotFoundException('Blocked slot not found');
     }
     if (existing.specialEvent) {
-      throw new BadRequestException('Este bloqueo pertenece a un evento especial. Adminístralo desde Eventos especiales.');
+      throw new BadRequestException(
+        'Este bloqueo pertenece a un evento especial. Adminístralo desde Eventos especiales.',
+      );
     }
 
     await this.prisma.blockedSlot.delete({ where: { id } });

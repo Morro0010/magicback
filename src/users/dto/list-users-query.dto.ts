@@ -1,8 +1,5 @@
-import { ProductCategory } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
-  IsBoolean,
-  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -11,7 +8,7 @@ import {
   Min,
 } from 'class-validator';
 
-export class ListProductsQueryDto {
+export class ListUsersQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -27,20 +24,6 @@ export class ListProductsQueryDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(140)
+  @MaxLength(160)
   search?: string;
-
-  @IsOptional()
-  @IsEnum(ProductCategory)
-  category?: ProductCategory;
-
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean()
-  lowStockOnly?: boolean;
 }

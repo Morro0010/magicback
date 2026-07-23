@@ -2,7 +2,10 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 
 async function generateOpenApi() {
@@ -24,7 +27,7 @@ async function generateOpenApi() {
   writeFileSync(outputPath, JSON.stringify(document, null, 2));
 
   await app.close();
-  // eslint-disable-next-line no-console
+
   console.log(`OpenAPI document generated at ${outputPath}`);
 }
 
