@@ -42,10 +42,7 @@ export function registerScannerBlocker(fastify: FastifyInstance) {
     const rawUrl = request.raw.url ?? request.url;
 
     if (isKnownScannerPath(rawUrl)) {
-      reply
-        .code(404)
-        .header('Cache-Control', 'no-store')
-        .send();
+      reply.code(404).header('Cache-Control', 'no-store').send();
       return;
     }
 

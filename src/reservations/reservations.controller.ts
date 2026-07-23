@@ -19,6 +19,7 @@ import { ListReservationsQueryDto } from './dto/list-reservations-query.dto';
 import { ReassignReservationDto } from './dto/reassign-reservation.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { UpdateReservationDto } from './dto/update-reservation.dto';
+import { ListHistoryQueryDto } from '../history/dto/list-history-query.dto';
 import { ReservationsService } from './reservations.service';
 
 @Controller('reservations')
@@ -29,6 +30,12 @@ export class ReservationsController {
   @Roles(UserRole.ADMIN, UserRole.CASHIER)
   listReservations(@Query() query: ListReservationsQueryDto) {
     return this.reservationsService.listReservations(query);
+  }
+
+  @Get('summary')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER)
+  getReservationSummary() {
+    return this.reservationsService.getReservationSummary();
   }
 
   @Post()
@@ -113,8 +120,11 @@ export class ReservationsController {
 
   @Get(':id/history')
   @Roles(UserRole.ADMIN)
-  getReservationHistory(@Param() params: IdParamDto) {
-    return this.reservationsService.getReservationHistory(params.id);
+  getReservationHistory(
+    @Param() params: IdParamDto,
+    @Query() query: ListHistoryQueryDto,
+  ) {
+    return this.reservationsService.getReservationHistory(params.id, query);
   }
 
   @Post(':id/regenerate-link')

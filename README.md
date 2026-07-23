@@ -18,4 +18,5 @@ npm run start:dev
 - `npm run build`
 - `npm test -- --runInBand`
 - `npm run openapi:json`
-- `npm run db:deploy`
+- `npm run db:deploy` (aplica migraciones y crea los índices grandes en línea)
+- `npm run db:indexes` (reintenta de forma segura únicamente los índices en línea)

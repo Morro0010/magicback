@@ -43,6 +43,7 @@ import { ReassignReservationDto } from './dto/reassign-reservation.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { ListReservationsQueryDto } from './dto/list-reservations-query.dto';
 import { EventType } from './dto/event-form.dto';
+import { ListHistoryQueryDto } from '../history/dto/list-history-query.dto';
 import {
   calculateEventFormPricing,
   getEventFormValidationMessage,
@@ -132,6 +133,22 @@ export class ReservationsService {
       items: reservations.map((reservation) =>
         this.toReservationResponse(reservation),
       ),
+    };
+  }
+
+  async getReservationSummary() {
+    const grouped = await this.prisma.reservation.groupBy({
+      by: ['status'],
+      _count: { _all: true },
+    });
+    const byStatus = grouped.reduce<Record<string, number>>((result, row) => {
+      result[row.status] = row._count._all;
+      return result;
+    }, {});
+
+    return {
+      total: grouped.reduce((sum, row) => sum + row._count._all, 0),
+      byStatus,
     };
   }
 
@@ -804,7 +821,10 @@ export class ReservationsService {
     return this.toReservationResponse(updated);
   }
 
-  async getReservationHistory(reservationId: string) {
+  async getReservationHistory(
+    reservationId: string,
+    query: ListHistoryQueryDto = {},
+  ) {
     const exists = await this.prisma.reservation.findUnique({
       where: { id: reservationId },
     });
@@ -812,7 +832,7 @@ export class ReservationsService {
       throw new NotFoundException('Reservation not found');
     }
 
-    return this.historyService.listByReservation(reservationId);
+    return this.historyService.listByReservation(reservationId, query);
   }
 
   async regeneratePublicLink(

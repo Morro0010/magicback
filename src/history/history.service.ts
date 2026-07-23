@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateHistoryEntryDto } from './dto/create-history-entry.dto';
+import { ListHistoryQueryDto } from './dto/list-history-query.dto';
 
 @Injectable()
 export class HistoryService {
@@ -30,8 +31,12 @@ export class HistoryService {
     });
   }
 
-  async listByReservation(reservationId: string) {
-    const records = await this.prisma.reservationHistory.findMany({
+  async listByReservation(
+    reservationId: string,
+    query: ListHistoryQueryDto = {},
+  ) {
+    const limit = query.limit ?? 20;
+    const recordsWithLookahead = await this.prisma.reservationHistory.findMany({
       where: { reservationId },
       include: {
         actor: {
@@ -43,20 +48,29 @@ export class HistoryService {
           },
         },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      cursor: query.cursor ? { id: query.cursor } : undefined,
+      skip: query.cursor ? 1 : 0,
+      take: limit + 1,
     });
+    const hasMore = recordsWithLookahead.length > limit;
+    const records = hasMore
+      ? recordsWithLookahead.slice(0, limit)
+      : recordsWithLookahead;
 
-    return records.map((record) => ({
-      id: record.id,
-      reservationId: record.reservationId,
-      actionType: record.actionType,
-      fieldChanged: record.fieldChanged,
-      oldValue: record.oldValueJson,
-      newValue: record.newValueJson,
-      createdAt: record.createdAt,
-      actor: record.actor,
-    }));
+    return {
+      nextCursor: hasMore ? (records.at(-1)?.id ?? null) : null,
+      hasMore,
+      items: records.map((record) => ({
+        id: record.id,
+        reservationId: record.reservationId,
+        actionType: record.actionType,
+        fieldChanged: record.fieldChanged,
+        oldValue: record.oldValueJson,
+        newValue: record.newValueJson,
+        createdAt: record.createdAt,
+        actor: record.actor,
+      })),
+    };
   }
 }

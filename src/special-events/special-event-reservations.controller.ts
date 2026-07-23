@@ -34,13 +34,22 @@ export class SpecialEventReservationsController {
 
   @Post(':id/confirm-payment')
   @Roles(UserRole.ADMIN)
-  confirmPayment(@Param() params: IdParamDto, @CurrentUser() user: { id: string }) {
-    return this.specialEventsService.confirmReservationPayment(params.id, user.id);
+  confirmPayment(
+    @Param() params: IdParamDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.specialEventsService.confirmReservationPayment(
+      params.id,
+      user.id,
+    );
   }
 
   @Post(':id/cancel')
   @Roles(UserRole.ADMIN)
-  cancelReservation(@Param() params: IdParamDto, @CurrentUser() user: { id: string }) {
+  cancelReservation(
+    @Param() params: IdParamDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.specialEventsService.cancelReservation(params.id, user.id);
   }
 

@@ -160,6 +160,8 @@ model Customer {
   @@index([name])
   @@index([phone])
   @@index([createdAt])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_name_trgm_idx")
+  @@index([phone(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_phone_trgm_idx")
 }
 
 model Celebrant {
@@ -301,6 +303,7 @@ model Notification {
   createdAt                        DateTime                 @default(now())
 
   @@index([isRead, createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "Notification_createdAt_id_idx")
 }
 
 model NotificationRead {
@@ -368,6 +371,7 @@ model CustomerReview {
   @@index([createdAt])
   @@index([averageRating])
   @@index([capturedByUserId])
+  @@index([customerName(ops: raw("gin_trgm_ops"))], type: Gin, map: "CustomerReview_customerName_trgm_idx")
 }
 
 model SpecialEvent {
@@ -395,6 +399,9 @@ model SpecialEvent {
 
   @@index([eventDate, status])
   @@index([status])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "SpecialEvent_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "SpecialEvent_description_trgm_idx")
+  @@index([status, eventDate, id], map: "SpecialEvent_status_eventDate_id_idx")
 }
 
 model SpecialEventReservation {
@@ -431,6 +438,8 @@ model SpecialEventReservation {
   @@index([holderPhone])
   @@index([createdAt])
   @@index([paymentConfirmedAt])
+  @@index([holderName(ops: raw("gin_trgm_ops"))], type: Gin, map: "SpecialEventReservation_holderName_trgm_idx")
+  @@index([holderPhone(ops: raw("gin_trgm_ops"))], type: Gin, map: "SpecialEventReservation_holderPhone_trgm_idx")
 }
 
 model SpecialEventTicket {
@@ -473,6 +482,8 @@ model Product {
   @@index([name])
   @@index([category])
   @@index([isActive, stockCurrent])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Product_name_trgm_idx")
+  @@index([isActive, category, name, id], map: "Product_active_category_name_id_idx")
 }
 
 model InventoryMovement {
@@ -497,6 +508,7 @@ model InventoryMovement {
 
   @@index([productId, createdAt])
   @@index([type, createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "InventoryMovement_createdAt_id_idx")
 }
 
 model Sale {
@@ -518,6 +530,7 @@ model Sale {
 
   @@index([createdAt])
   @@index([paymentMethod, createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "Sale_createdAt_id_idx")
 }
 
 model SaleItem {
@@ -556,6 +569,7 @@ model Purchase {
   updatedAt          DateTime            @updatedAt
 
   @@index([createdAt])
+  @@index([createdAt(sort: Desc), id(sort: Desc)], map: "Purchase_createdAt_id_idx")
 }
 
 model PurchaseItem {

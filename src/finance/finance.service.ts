@@ -15,7 +15,9 @@ const SEPARATE_FINANCIAL_ACCOUNTS = [
   },
 ] as const;
 
-type FinancialAccountKey = 'MAIN' | (typeof SEPARATE_FINANCIAL_ACCOUNTS)[number]['key'];
+type FinancialAccountKey =
+  | 'MAIN'
+  | (typeof SEPARATE_FINANCIAL_ACCOUNTS)[number]['key'];
 
 @Injectable()
 export class FinanceService {
@@ -52,7 +54,10 @@ export class FinanceService {
       this.salesByPaymentMethod(periodRange),
       this.topSoldProducts(periodRange),
       this.lowStockProducts(),
-      this.prisma.product.findMany({ where: { isActive: true }, select: { costPrice: true, stockCurrent: true } }),
+      this.prisma.product.findMany({
+        where: { isActive: true },
+        select: { costPrice: true, stockCurrent: true },
+      }),
       this.prisma.sale.findMany({
         where: this.whereByDateRange(periodRange),
         include: {
@@ -61,7 +66,7 @@ export class FinanceService {
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 250,
+        take: 10,
       }),
       this.prisma.purchase.findMany({
         where: this.wherePurchaseByDateRange(periodRange),
@@ -71,27 +76,32 @@ export class FinanceService {
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 250,
+        take: 10,
       }),
       this.grossProfit(todayRange),
       this.grossProfit(periodRange),
       this.salesByFinancialAccount(todayRange),
       this.salesByFinancialAccount(periodRange),
-      this.specialEventsService?.getFinanceSummary(periodRange) ?? Promise.resolve({
-        expectedSpecialEventIncomePeriod: 0,
-        confirmedSpecialEventIncomePeriod: 0,
-        pendingSpecialEventIncomePeriod: 0,
-        reservationCounts: {
-          pendingPayment: 0,
-          paymentConfirmed: 0,
-          cancelled: 0,
-        },
-      }),
+      this.specialEventsService?.getFinanceSummary(periodRange) ??
+        Promise.resolve({
+          expectedSpecialEventIncomePeriod: 0,
+          confirmedSpecialEventIncomePeriod: 0,
+          pendingSpecialEventIncomePeriod: 0,
+          reservationCounts: {
+            pendingPayment: 0,
+            paymentConfirmed: 0,
+            cancelled: 0,
+          },
+        }),
     ]);
 
     const inventoryValuation = Number(
       products
-        .reduce((acc, product) => acc + product.costPrice.toNumber() * product.stockCurrent, 0)
+        .reduce(
+          (acc, product) =>
+            acc + product.costPrice.toNumber() * product.stockCurrent,
+          0,
+        )
         .toFixed(2),
     );
 
@@ -220,7 +230,9 @@ export class FinanceService {
 
   private resolveTodayRange(): DateRange {
     const now = new Date();
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const start = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 1);
     return { from: start, to: end };
@@ -245,7 +257,9 @@ export class FinanceService {
     };
   }
 
-  private wherePurchaseByDateRange(range: DateRange): Prisma.PurchaseWhereInput {
+  private wherePurchaseByDateRange(
+    range: DateRange,
+  ): Prisma.PurchaseWhereInput {
     return {
       createdAt:
         range.from || range.to
@@ -282,13 +296,19 @@ export class FinanceService {
     });
 
     const totalsByCategory = new Map(
-      grouped.map((row) => [row.categorySnapshot, row._sum.subtotal?.toNumber() ?? 0]),
+      grouped.map((row) => [
+        row.categorySnapshot,
+        row._sum.subtotal?.toNumber() ?? 0,
+      ]),
     );
 
     const operationSales = Number(
       Object.values(ProductCategory)
         .filter((category) => !separatedCategories.has(category))
-        .reduce((acc, category) => acc + (totalsByCategory.get(category) ?? 0), 0)
+        .reduce(
+          (acc, category) => acc + (totalsByCategory.get(category) ?? 0),
+          0,
+        )
         .toFixed(2),
     );
 
@@ -296,7 +316,9 @@ export class FinanceService {
       {
         key: 'MAIN' as const,
         label: 'Ingresos operación principal',
-        categories: Object.values(ProductCategory).filter((category) => !separatedCategories.has(category)),
+        categories: Object.values(ProductCategory).filter(
+          (category) => !separatedCategories.has(category),
+        ),
         total: operationSales,
       },
       ...SEPARATE_FINANCIAL_ACCOUNTS.map((account) => ({
@@ -305,13 +327,18 @@ export class FinanceService {
         categories: [...account.categories],
         total: Number(
           account.categories
-            .reduce((acc, category) => acc + (totalsByCategory.get(category) ?? 0), 0)
+            .reduce(
+              (acc, category) => acc + (totalsByCategory.get(category) ?? 0),
+              0,
+            )
             .toFixed(2),
         ),
       })),
     ];
 
-    const byKey = accounts.reduce<Record<FinancialAccountKey, (typeof accounts)[number]>>(
+    const byKey = accounts.reduce<
+      Record<FinancialAccountKey, (typeof accounts)[number]>
+    >(
       (acc, account) => {
         acc[account.key] = account;
         return acc;
@@ -319,7 +346,9 @@ export class FinanceService {
       {} as Record<FinancialAccountKey, (typeof accounts)[number]>,
     );
 
-    const combinedSales = Number(accounts.reduce((acc, account) => acc + account.total, 0).toFixed(2));
+    const combinedSales = Number(
+      accounts.reduce((acc, account) => acc + account.total, 0).toFixed(2),
+    );
 
     return {
       accounts,
@@ -348,7 +377,6 @@ export class FinanceService {
         unitSalePrice: true,
         unitCostPrice: true,
       },
-      take: 10_000,
     });
 
     return Number(
@@ -421,7 +449,10 @@ export class FinanceService {
     });
 
     return products
-      .filter((product) => product.stockMin !== null && product.stockCurrent <= product.stockMin)
+      .filter(
+        (product) =>
+          product.stockMin !== null && product.stockCurrent <= product.stockMin,
+      )
       .map((product) => ({
         id: product.id,
         name: product.name,

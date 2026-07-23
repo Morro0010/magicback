@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PublicRoute } from '../common/decorators/public-route.decorator';
@@ -17,8 +25,8 @@ export class SpecialEventsController {
 
   @Get('public')
   @PublicRoute()
-  listPublicEvents() {
-    return this.specialEventsService.listPublicEvents();
+  listPublicEvents(@Query() query: ListSpecialEventsQueryDto) {
+    return this.specialEventsService.listPublicEvents(query);
   }
 
   @Get('public/:id')
@@ -69,13 +77,19 @@ export class SpecialEventsController {
 
   @Post(':id/publish')
   @Roles(UserRole.ADMIN)
-  publishEvent(@Param() params: IdParamDto, @CurrentUser() user: { id: string }) {
+  publishEvent(
+    @Param() params: IdParamDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.specialEventsService.publishEvent(params.id, user.id);
   }
 
   @Post(':id/unpublish')
   @Roles(UserRole.ADMIN)
-  unpublishEvent(@Param() params: IdParamDto, @CurrentUser() user: { id: string }) {
+  unpublishEvent(
+    @Param() params: IdParamDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.specialEventsService.unpublishEvent(params.id, user.id);
   }
 
@@ -87,7 +101,10 @@ export class SpecialEventsController {
 
   @Post(':id/cancel')
   @Roles(UserRole.ADMIN)
-  cancelEvent(@Param() params: IdParamDto, @CurrentUser() user: { id: string }) {
+  cancelEvent(
+    @Param() params: IdParamDto,
+    @CurrentUser() user: { id: string },
+  ) {
     return this.specialEventsService.cancelEvent(params.id, user.id);
   }
 

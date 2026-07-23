@@ -106,12 +106,72 @@ export class CustomersService {
         orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
+        include: {
+          _count: {
+            select: {
+              reservations: true,
+              specialEventReservations: true,
+              celebrants: true,
+            },
+          },
+        },
       }),
     ]);
 
-    const items = await Promise.all(
-      customers.map((customer) => this.toListItem(customer.id)),
-    );
+    const customerIds = customers.map((customer) => customer.id);
+    const [reservations, specialReservations] = customerIds.length
+      ? await Promise.all([
+          this.prisma.reservation.findMany({
+            where: {
+              customerId: { in: customerIds },
+              status: { not: ReservationStatus.CANCELLED },
+            },
+            select: {
+              customerId: true,
+              advanceAmount: true,
+              pendingBalance: true,
+            },
+          }),
+          this.prisma.specialEventReservation.findMany({
+            where: {
+              customerId: { in: customerIds },
+              status: { not: SpecialEventReservationStatus.CANCELLED },
+            },
+            select: { customerId: true, totalAmount: true },
+          }),
+        ])
+      : [[], []];
+    const totalsByCustomer = new Map<string, number>();
+    for (const reservation of reservations) {
+      if (!reservation.customerId) continue;
+      totalsByCustomer.set(
+        reservation.customerId,
+        (totalsByCustomer.get(reservation.customerId) ?? 0) +
+          reservation.advanceAmount.toNumber() +
+          reservation.pendingBalance.toNumber(),
+      );
+    }
+    for (const reservation of specialReservations) {
+      if (!reservation.customerId) continue;
+      totalsByCustomer.set(
+        reservation.customerId,
+        (totalsByCustomer.get(reservation.customerId) ?? 0) +
+          reservation.totalAmount.toNumber(),
+      );
+    }
+    const items = customers.map((customer) => ({
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      normalizedPhone: customer.normalizedPhone,
+      email: customer.email,
+      firstSeenAt: customer.firstSeenAt,
+      reservationCount: customer._count.reservations,
+      specialEventReservationCount: customer._count.specialEventReservations,
+      celebrantCount: customer._count.celebrants,
+      totalSpent: Number((totalsByCustomer.get(customer.id) ?? 0).toFixed(2)),
+      updatedAt: customer.updatedAt,
+    }));
 
     return { page, limit, total, items };
   }
@@ -143,7 +203,26 @@ export class CustomersService {
 
   async listUpcomingBirthdays() {
     const today = parseEventDate(getBusinessCalendarDate());
+    const birthdayPredicates = Array.from(
+      { length: UPCOMING_BIRTHDAY_WINDOW_DAYS + 1 },
+      (_, offset) => {
+        const date = new Date(today);
+        date.setUTCDate(date.getUTCDate() + offset);
+        return Prisma.sql`(
+          EXTRACT(MONTH FROM "birthDate") = ${date.getUTCMonth() + 1}
+          AND EXTRACT(DAY FROM "birthDate") = ${date.getUTCDate()}
+        )`;
+      },
+    );
+    const candidateIds = await this.prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT "id"
+        FROM "Celebrant"
+        WHERE ${Prisma.join(birthdayPredicates, ' OR ')}
+      `,
+    );
     const celebrants = await this.prisma.celebrant.findMany({
+      where: { id: { in: candidateIds.map(({ id }) => id) } },
       include: {
         customer: true,
       },

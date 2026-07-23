@@ -28,22 +28,35 @@ describe('FinanceService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.sale.aggregate.mockResolvedValue({ _sum: { total: decimal(250) } });
-    prisma.purchase.aggregate.mockResolvedValue({ _sum: { totalCost: decimal(80) } });
+    prisma.purchase.aggregate.mockResolvedValue({
+      _sum: { totalCost: decimal(80) },
+    });
     prisma.sale.findMany.mockResolvedValue([]);
     prisma.purchase.findMany.mockResolvedValue([]);
     prisma.saleItem.findMany.mockResolvedValue([]);
     prisma.product.findMany.mockResolvedValue([]);
-    prisma.saleItem.groupBy.mockImplementation((args: { by: string[]; _sum: unknown }) => {
-      if (args.by.includes('categorySnapshot')) {
-        return Promise.resolve([
-          { categorySnapshot: ProductCategory.BEBIDAS, _sum: { subtotal: decimal(120) } },
-          { categorySnapshot: ProductCategory.BOTANAS, _sum: { subtotal: decimal(30) } },
-          { categorySnapshot: CINE_CATEGORY, _sum: { subtotal: decimal(100) } },
-        ]);
-      }
+    prisma.saleItem.groupBy.mockImplementation(
+      (args: { by: string[]; _sum: unknown }) => {
+        if (args.by.includes('categorySnapshot')) {
+          return Promise.resolve([
+            {
+              categorySnapshot: ProductCategory.BEBIDAS,
+              _sum: { subtotal: decimal(120) },
+            },
+            {
+              categorySnapshot: ProductCategory.BOTANAS,
+              _sum: { subtotal: decimal(30) },
+            },
+            {
+              categorySnapshot: CINE_CATEGORY,
+              _sum: { subtotal: decimal(100) },
+            },
+          ]);
+        }
 
-      return Promise.resolve([]);
-    });
+        return Promise.resolve([]);
+      },
+    );
   });
 
   it('separates CINE income from operation income without changing legacy totals', async () => {
@@ -62,17 +75,20 @@ describe('FinanceService', () => {
   });
 
   it('keeps payment method totals available for existing dashboard consumers', async () => {
-    prisma.sale.aggregate.mockImplementation(({ where }: { where?: { paymentMethod?: PaymentMethod } }) =>
-      Promise.resolve({
-        _sum: {
-          total: decimal(where?.paymentMethod ? 10 : 250),
-        },
-      }),
+    prisma.sale.aggregate.mockImplementation(
+      ({ where }: { where?: { paymentMethod?: PaymentMethod } }) =>
+        Promise.resolve({
+          _sum: {
+            total: decimal(where?.paymentMethod ? 10 : 250),
+          },
+        }),
     );
 
     const result = await service.getDashboard({});
 
-    expect(result.paymentMethodTotals).toHaveLength(Object.values(PaymentMethod).length);
+    expect(result.paymentMethodTotals).toHaveLength(
+      Object.values(PaymentMethod).length,
+    );
     expect(result.paymentMethodTotals[0]).toEqual(
       expect.objectContaining({
         paymentMethod: expect.any(String),

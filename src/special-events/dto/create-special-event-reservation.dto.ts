@@ -1,5 +1,15 @@
 import { SpecialEventAttendeeType } from '@prisma/client';
-import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength, ValidateNested, ArrayMaxSize, ArrayMinSize } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+  ArrayMaxSize,
+  ArrayMinSize,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class SpecialEventAttendeeDto {

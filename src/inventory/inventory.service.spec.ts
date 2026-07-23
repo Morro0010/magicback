@@ -17,7 +17,9 @@ describe('InventoryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.$transaction.mockImplementation((ops: Array<Promise<unknown>>) => Promise.all(ops));
+    prisma.$transaction.mockImplementation((ops: Array<Promise<unknown>>) =>
+      Promise.all(ops),
+    );
   });
 
   it('applies manual adjustment and records movement', async () => {

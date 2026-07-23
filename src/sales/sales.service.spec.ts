@@ -105,8 +105,8 @@ describe('SalesService', () => {
       },
     };
 
-    prisma.$transaction.mockImplementation(async (fn: (txArg: typeof tx) => Promise<unknown>) =>
-      fn(tx),
+    prisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     );
 
     const result = await service.createSale(
@@ -233,8 +233,8 @@ describe('SalesService', () => {
       },
     };
 
-    prisma.$transaction.mockImplementation(async (fn: (txArg: typeof tx) => Promise<unknown>) =>
-      fn(tx),
+    prisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     );
 
     const result = await service.createSale(

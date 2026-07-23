@@ -1,43 +1,81 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { AuditService } from '../common/services/audit.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
-  const usersService = {
-    findByEmail: jest.fn(),
-  } as any;
+  type SessionUpdateManyArgs = {
+    where: {
+      id?: string;
+      userId?: string;
+      isActive?: boolean;
+      OR?: Array<{
+        inactivityExpiresAt?: { lte: Date };
+        absoluteExpiresAt?: { lte: Date };
+      }>;
+    };
+    data: { isActive: boolean };
+  };
 
+  const findByEmailMock = jest.fn<UsersService['findByEmail']>();
+  const usersService = {
+    findByEmail: findByEmailMock,
+  } as unknown as UsersService;
+
+  const sessionUpdateManyCalls: SessionUpdateManyArgs[] = [];
+  const sessionUpdateManyMock = jest.fn(
+    (args: SessionUpdateManyArgs): Promise<{ count: number }> => {
+      sessionUpdateManyCalls.push(args);
+      return Promise.resolve({ count: 1 });
+    },
+  );
+  const sessionCreateMock = jest.fn();
   const prisma = {
     session: {
-      updateMany: jest.fn(),
-      create: jest.fn(),
+      updateMany: sessionUpdateManyMock,
+      create: sessionCreateMock,
     },
-  } as any;
+  } as unknown as PrismaService;
 
+  const getOrThrowMock = jest.fn((key: string): number | string => {
+    const values: Record<string, number | string> = {
+      SESSION_INACTIVITY_TIMEOUT_MINUTES: 30,
+      SESSION_ABSOLUTE_TIMEOUT_HOURS: 8,
+    };
+    const value = values[key];
+    if (value === undefined) {
+      throw new Error(`Missing test configuration: ${key}`);
+    }
+    return value;
+  });
   const configService = {
-    getOrThrow: jest.fn((key: string) => {
-      const values: Record<string, number | string> = {
-        SESSION_INACTIVITY_TIMEOUT_MINUTES: 30,
-        SESSION_ABSOLUTE_TIMEOUT_HOURS: 8,
-      };
-      return values[key];
-    }),
-  } as any;
+    getOrThrow: getOrThrowMock,
+  } as unknown as ConfigService;
 
+  const auditLogMock = jest.fn<AuditService['log']>();
   const auditService = {
-    log: jest.fn(),
-  } as any;
+    log: auditLogMock,
+  } as unknown as AuditService;
 
-  const service = new AuthService(usersService, prisma, configService, auditService);
+  const service = new AuthService(
+    usersService,
+    prisma,
+    configService,
+    auditService,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    sessionUpdateManyCalls.length = 0;
   });
 
-  it('logs in and creates a rotated session', async () => {
+  it('logs in, retires only expired sessions and creates a new session', async () => {
     const passwordHash = await argon2.hash('Admin123!');
-    usersService.findByEmail.mockResolvedValue({
+    findByEmailMock.mockResolvedValue({
       id: 'u1',
       email: 'admin@magiccity.local',
       name: 'Admin',
@@ -54,8 +92,17 @@ describe('AuthService', () => {
       { ipAddress: '127.0.0.1', userAgent: 'jest' },
     );
 
-    expect(prisma.session.updateMany).toHaveBeenCalled();
-    expect(prisma.session.create).toHaveBeenCalled();
+    const updateExpiredSessionsArgs = sessionUpdateManyCalls[0];
+    expect(updateExpiredSessionsArgs?.where.userId).toBe('u1');
+    expect(updateExpiredSessionsArgs?.where.isActive).toBe(true);
+    expect(
+      updateExpiredSessionsArgs?.where.OR?.[0]?.inactivityExpiresAt?.lte,
+    ).toBeInstanceOf(Date);
+    expect(
+      updateExpiredSessionsArgs?.where.OR?.[1]?.absoluteExpiresAt?.lte,
+    ).toBeInstanceOf(Date);
+    expect(updateExpiredSessionsArgs?.data).toEqual({ isActive: false });
+    expect(sessionCreateMock).toHaveBeenCalled();
     expect(result.sessionToken).toBeDefined();
     expect(result.csrfToken).toBeDefined();
     expect(result.user.email).toEqual('admin@magiccity.local');
@@ -63,7 +110,7 @@ describe('AuthService', () => {
 
   it('throws unauthorized for invalid password', async () => {
     const passwordHash = await argon2.hash('Admin123!');
-    usersService.findByEmail.mockResolvedValue({
+    findByEmailMock.mockResolvedValue({
       id: 'u1',
       email: 'admin@magiccity.local',
       name: 'Admin',
@@ -86,7 +133,7 @@ describe('AuthService', () => {
       userAgent: 'jest',
     });
 
-    expect(prisma.session.updateMany).toHaveBeenCalledWith({
+    expect(sessionUpdateManyMock).toHaveBeenCalledWith({
       where: {
         id: 'session-id',
         isActive: true,

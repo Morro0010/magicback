@@ -12,7 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { TIME_FORMAT_REGEX } from '../../common/constants';
-import { Transform, Type } from 'class-transformer';
+import { Transform, type TransformFnParams, Type } from 'class-transformer';
 import { EventFormDto } from '../../reservations/dto/event-form.dto';
 
 export class UpdatePublicReservationDto {
@@ -40,7 +40,9 @@ export class UpdatePublicReservationDto {
   attendeesCount?: number;
 
   @IsOptional()
-  @Transform(({ value }) => (value === '' ? undefined : value))
+  @Transform(({ value }: TransformFnParams): unknown =>
+    value === '' ? undefined : value,
+  )
   @IsString()
   @Length(8, 64)
   packageId?: string;

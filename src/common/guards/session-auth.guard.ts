@@ -30,13 +30,16 @@ export class SessionAuthGuard implements CanActivate {
     }
 
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const cookieName = this.configService.getOrThrow<string>('SESSION_COOKIE_NAME');
+    const cookieName = this.configService.getOrThrow<string>(
+      'SESSION_COOKIE_NAME',
+    );
     const isDesktopRequest = req.headers['x-magic-desktop'] === 'true';
     const authorizationHeader = req.headers.authorization;
     const bearerToken = authorizationHeader?.startsWith('Bearer ')
       ? authorizationHeader.slice('Bearer '.length).trim()
       : undefined;
-    const rawToken = bearerToken ?? req.cookies?.[cookieName] as string | undefined;
+    const rawToken =
+      bearerToken ?? (req.cookies?.[cookieName] as string | undefined);
 
     if (!rawToken) {
       throw new UnauthorizedException('Authentication required');
@@ -52,7 +55,10 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException('Session not found');
     }
 
-    if (session.absoluteExpiresAt <= now || session.inactivityExpiresAt <= now) {
+    if (
+      session.absoluteExpiresAt <= now ||
+      session.inactivityExpiresAt <= now
+    ) {
       await this.prisma.session.update({
         where: { id: session.id },
         data: { isActive: false },
@@ -68,7 +74,10 @@ export class SessionAuthGuard implements CanActivate {
       'SESSION_INACTIVITY_TIMEOUT_MINUTES',
     );
     const refreshedInactivity = new Date(
-      now.getTime() + inactivityWindowMinutes * 60 * 1000,
+      Math.min(
+        now.getTime() + inactivityWindowMinutes * 60 * 1000,
+        session.absoluteExpiresAt.getTime(),
+      ),
     );
 
     await this.prisma.session.update({
@@ -91,7 +100,11 @@ export class SessionAuthGuard implements CanActivate {
       csrfTokenHash: session.csrfTokenHash,
       inactivityExpiresAt: refreshedInactivity,
       absoluteExpiresAt: session.absoluteExpiresAt,
-      client: bearerToken ? (isDesktopRequest ? 'desktop' : 'browser-token') : 'web',
+      client: bearerToken
+        ? isDesktopRequest
+          ? 'desktop'
+          : 'browser-token'
+        : 'web',
     };
 
     return true;

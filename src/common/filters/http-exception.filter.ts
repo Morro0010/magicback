@@ -27,9 +27,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       : { message: 'Internal server error' };
 
     const body =
-      typeof payload === 'string'
-        ? { message: payload }
-        : { ...(payload as object) };
+      typeof payload === 'string' ? { message: payload } : { ...payload };
 
     if (status >= 500) {
       this.logger.error(

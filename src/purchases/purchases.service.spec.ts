@@ -38,7 +38,9 @@ describe('PurchasesService', () => {
 
     const tx = {
       purchase: {
-        create: jest.fn().mockResolvedValue({ id: 'c1', folio: 'C-20260319-10001' }),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'c1', folio: 'C-20260319-10001' }),
         findUniqueOrThrow: jest.fn().mockResolvedValue({
           id: 'c1',
           folio: 'C-20260319-10001',
@@ -81,8 +83,8 @@ describe('PurchasesService', () => {
       },
     };
 
-    prisma.$transaction.mockImplementation(async (fn: (txArg: typeof tx) => Promise<unknown>) =>
-      fn(tx),
+    prisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     );
 
     const result = await service.createPurchase(

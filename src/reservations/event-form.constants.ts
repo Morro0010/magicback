@@ -198,7 +198,10 @@ export type EventFormPayload = {
 };
 
 type EventFormInput =
-  EventFormDto | Partial<EventFormPayload> | null | undefined;
+  | EventFormDto
+  | Partial<EventFormPayload>
+  | null
+  | undefined;
 
 export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
   const eventType = normalizeEventType(input);

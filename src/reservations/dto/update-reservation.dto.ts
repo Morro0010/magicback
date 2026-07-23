@@ -15,7 +15,7 @@ import {
 } from 'class-validator';
 import { PaymentMethod, ReservationStatus } from '@prisma/client';
 import { TIME_FORMAT_REGEX } from '../../common/constants';
-import { Transform, Type } from 'class-transformer';
+import { Transform, type TransformFnParams, Type } from 'class-transformer';
 import { EventFormDto } from './event-form.dto';
 
 export class UpdateReservationDto {
@@ -43,7 +43,9 @@ export class UpdateReservationDto {
   attendeesCount?: number;
 
   @IsOptional()
-  @Transform(({ value }) => (value === '' ? undefined : value))
+  @Transform(({ value }: TransformFnParams): unknown =>
+    value === '' ? undefined : value,
+  )
   @IsString()
   @Length(8, 64)
   packageId?: string;

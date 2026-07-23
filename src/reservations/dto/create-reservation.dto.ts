@@ -14,7 +14,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { Transform, type TransformFnParams, Type } from 'class-transformer';
 import { PaymentMethod, ReservationStatus } from '@prisma/client';
 import { TIME_FORMAT_REGEX } from '../../common/constants';
 import { EventFormDto } from './event-form.dto';
@@ -43,7 +43,9 @@ export class CreateReservationDto {
   attendeesCount?: number;
 
   @IsOptional()
-  @Transform(({ value }) => (value === '' ? undefined : value))
+  @Transform(({ value }: TransformFnParams): unknown =>
+    value === '' ? undefined : value,
+  )
   @IsString()
   @Length(8, 64)
   packageId?: string;

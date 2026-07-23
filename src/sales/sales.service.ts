@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   InventoryMovementType,
   NotificationType,
@@ -38,8 +42,17 @@ export class SalesService {
   ) {}
 
   async listSales(query: ListSalesQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
     const where: Prisma.SaleWhereInput = {
       paymentMethod: query.paymentMethod,
+      OR: search
+        ? [
+            { folio: { contains: search, mode: 'insensitive' } },
+            { customerPhone: { contains: search, mode: 'insensitive' } },
+          ]
+        : undefined,
       createdAt:
         query.from || query.to
           ? {
@@ -49,14 +62,30 @@ export class SalesService {
           : undefined,
     };
 
-    const sales = await this.prisma.sale.findMany({
-      where,
-      include: SALE_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-      take: 250,
-    });
+    const [total, aggregate, forcedCount, sales] =
+      await this.prisma.$transaction([
+        this.prisma.sale.count({ where }),
+        this.prisma.sale.aggregate({ where, _sum: { total: true } }),
+        this.prisma.sale.count({ where: { ...where, forcedByAdmin: true } }),
+        this.prisma.sale.findMany({
+          where,
+          include: {
+            createdByUser: SALE_INCLUDE.createdByUser,
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+      ]);
 
     return {
+      page,
+      limit,
+      total,
+      summary: {
+        totalSales: aggregate._sum.total?.toNumber() ?? 0,
+        forcedCount,
+      },
       items: sales.map((sale) => this.toResponse(sale)),
     };
   }
@@ -76,7 +105,12 @@ export class SalesService {
 
   async createSale(
     dto: CreateSaleDto,
-    actor: { id: string; role: UserRole; ipAddress?: string; userAgent?: string },
+    actor: {
+      id: string;
+      role: UserRole;
+      ipAddress?: string;
+      userAgent?: string;
+    },
   ) {
     if (!dto.items.length) {
       throw new BadRequestException('Debes agregar al menos un producto');
@@ -87,10 +121,13 @@ export class SalesService {
       throw new BadRequestException('Solo ADMIN puede forzar sobreventa');
     }
 
-    const groupedItems = dto.items.reduce<Record<string, number>>((acc, item) => {
-      acc[item.productId] = (acc[item.productId] ?? 0) + item.quantity;
-      return acc;
-    }, {});
+    const groupedItems = dto.items.reduce<Record<string, number>>(
+      (acc, item) => {
+        acc[item.productId] = (acc[item.productId] ?? 0) + item.quantity;
+        return acc;
+      },
+      {},
+    );
 
     const products = await this.prisma.product.findMany({
       where: {
@@ -111,43 +148,43 @@ export class SalesService {
       }
     }
 
-    const lineItems = Object.entries(groupedItems).map(([productId, quantity]) => {
-      const product = byId.get(productId);
-      if (!product) {
-        throw new BadRequestException('Producto no encontrado en carrito');
-      }
+    const lineItems = Object.entries(groupedItems).map(
+      ([productId, quantity]) => {
+        const product = byId.get(productId);
+        if (!product) {
+          throw new BadRequestException('Producto no encontrado en carrito');
+        }
 
-      const forcedForItem = product.stockCurrent < quantity;
-      if (forcedForItem && !forceNegativeRequested) {
-        throw new BadRequestException(
-          `Stock insuficiente para ${product.name}. Disponible: ${product.stockCurrent}`,
-        );
-      }
+        const forcedForItem = product.stockCurrent < quantity;
+        if (forcedForItem && !forceNegativeRequested) {
+          throw new BadRequestException(
+            `Stock insuficiente para ${product.name}. Disponible: ${product.stockCurrent}`,
+          );
+        }
 
-      if (forcedForItem && actor.role !== UserRole.ADMIN) {
-        throw new BadRequestException(
-          `Solo ADMIN puede forzar sobreventa en ${product.name}`,
-        );
-      }
+        if (forcedForItem && actor.role !== UserRole.ADMIN) {
+          throw new BadRequestException(
+            `Solo ADMIN puede forzar sobreventa en ${product.name}`,
+          );
+        }
 
-      const unitSalePrice = product.salePrice.toNumber();
-      const unitCostPrice = product.costPrice.toNumber();
-      const subtotal = Number((unitSalePrice * quantity).toFixed(2));
+        const unitSalePrice = product.salePrice.toNumber();
+        const unitCostPrice = product.costPrice.toNumber();
+        const subtotal = Number((unitSalePrice * quantity).toFixed(2));
 
-      return {
-        product,
-        quantity,
-        forcedForItem,
-        unitSalePrice,
-        unitCostPrice,
-        subtotal,
-      };
-    });
+        return {
+          product,
+          quantity,
+          forcedForItem,
+          unitSalePrice,
+          unitCostPrice,
+          subtotal,
+        };
+      },
+    );
 
     const subtotal = Number(
-      lineItems
-        .reduce((acc, item) => acc + item.subtotal, 0)
-        .toFixed(2),
+      lineItems.reduce((acc, item) => acc + item.subtotal, 0).toFixed(2),
     );
 
     const folio = this.buildFolio();
@@ -237,7 +274,8 @@ export class SalesService {
         newStock: item.product.stockCurrent - item.quantity,
       }))
       .filter(
-        (product) => product.stockMin !== null && product.newStock <= product.stockMin,
+        (product) =>
+          product.stockMin !== null && product.newStock <= product.stockMin,
       );
 
     for (const product of lowStockProducts) {
@@ -296,7 +334,12 @@ export class SalesService {
   async sendTicketByWhatsApp(
     saleId: string,
     dto: SendSaleWhatsAppDto,
-    actor: { id: string; role: UserRole; ipAddress?: string; userAgent?: string },
+    actor: {
+      id: string;
+      role: UserRole;
+      ipAddress?: string;
+      userAgent?: string;
+    },
   ) {
     const sale = await this.prisma.sale.findUnique({
       where: { id: saleId },
@@ -307,9 +350,13 @@ export class SalesService {
       throw new NotFoundException('Venta no encontrada');
     }
 
-    const destination = normalizePhoneNumber(dto.phone ?? sale.customerPhone ?? null);
+    const destination = normalizePhoneNumber(
+      dto.phone ?? sale.customerPhone ?? null,
+    );
     if (!destination) {
-      throw new BadRequestException('Número de WhatsApp inválido o no disponible');
+      throw new BadRequestException(
+        'Número de WhatsApp inválido o no disponible',
+      );
     }
 
     const message = this.buildTicketSummaryMessage({
@@ -361,7 +408,7 @@ export class SalesService {
     notes: string | null;
     createdByUserId: string;
     createdByUser: { id: string; name: string; email: string; role: UserRole };
-    items: Array<{
+    items?: Array<{
       id: string;
       saleId: string;
       productId: string;
@@ -390,7 +437,7 @@ export class SalesService {
       notes: sale.notes,
       createdByUserId: sale.createdByUserId,
       createdByUser: sale.createdByUser,
-      items: sale.items.map((item) => ({
+      items: (sale.items ?? []).map((item) => ({
         id: item.id,
         saleId: item.saleId,
         productId: item.productId,

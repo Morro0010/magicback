@@ -108,28 +108,34 @@ export class SpecialEventsService {
       }),
     ]);
 
-    const items = await Promise.all(
-      events.map((event) => this.toEventResponse(event)),
-    );
+    const items = await this.toEventResponses(events);
     return { page, limit, total, items };
   }
 
-  async listPublicEvents() {
+  async listPublicEvents(query: ListSpecialEventsQueryDto = {}) {
     const today = this.today();
-    const events = await this.prisma.specialEvent.findMany({
-      where: {
-        status: SpecialEventStatus.PUBLISHED,
-        eventDate: { gte: today },
-      },
-      include: SPECIAL_EVENT_INCLUDE,
-      orderBy: [{ eventDate: 'asc' }, { startTime: 'asc' }],
-      take: 50,
-    });
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 9, 50);
+    const where: Prisma.SpecialEventWhereInput = {
+      status: SpecialEventStatus.PUBLISHED,
+      eventDate: { gte: today },
+    };
+    const [total, events] = await this.prisma.$transaction([
+      this.prisma.specialEvent.count({ where }),
+      this.prisma.specialEvent.findMany({
+        where,
+        include: SPECIAL_EVENT_INCLUDE,
+        orderBy: [{ eventDate: 'asc' }, { startTime: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
 
     return {
-      items: await Promise.all(
-        events.map((event) => this.toEventResponse(event)),
-      ),
+      page,
+      limit,
+      total,
+      items: await this.toEventResponses(events),
     };
   }
 
@@ -1134,6 +1140,93 @@ export class SpecialEventsService {
 
   private async toEventResponse(event: SpecialEventWithInclude) {
     const stats = await this.eventStats(event.id, event.capacityMax);
+    return this.mapEventResponse(event, stats);
+  }
+
+  private async toEventResponses(events: SpecialEventWithInclude[]) {
+    if (events.length === 0) {
+      return [];
+    }
+    const ids = events.map((event) => event.id);
+    const grouped = await this.prisma.specialEventReservation.groupBy({
+      by: ['specialEventId', 'status'],
+      where: { specialEventId: { in: ids } },
+      _count: { _all: true },
+      _sum: { totalAmount: true, childCount: true, adultCount: true },
+    });
+    const byEvent = new Map<
+      string,
+      {
+        reservedCount: number;
+        expectedIncome: number;
+        confirmedIncome: number;
+        pendingIncome: number;
+        pendingReservations: number;
+        confirmedReservations: number;
+        cancelledReservations: number;
+      }
+    >();
+    for (const row of grouped) {
+      const stats = byEvent.get(row.specialEventId) ?? {
+        reservedCount: 0,
+        expectedIncome: 0,
+        confirmedIncome: 0,
+        pendingIncome: 0,
+        pendingReservations: 0,
+        confirmedReservations: 0,
+        cancelledReservations: 0,
+      };
+      const count = row._count._all;
+      const amount = row._sum.totalAmount?.toNumber() ?? 0;
+      if (row.status !== SpecialEventReservationStatus.CANCELLED) {
+        stats.reservedCount +=
+          (row._sum.childCount ?? 0) + (row._sum.adultCount ?? 0);
+        stats.expectedIncome += amount;
+      }
+      if (row.status === SpecialEventReservationStatus.PENDING_PAYMENT) {
+        stats.pendingIncome += amount;
+        stats.pendingReservations += count;
+      } else if (
+        row.status === SpecialEventReservationStatus.PAYMENT_CONFIRMED
+      ) {
+        stats.confirmedIncome += amount;
+        stats.confirmedReservations += count;
+      } else {
+        stats.cancelledReservations += count;
+      }
+      byEvent.set(row.specialEventId, stats);
+    }
+
+    return events.map((event) => {
+      const stats = byEvent.get(event.id) ?? {
+        reservedCount: 0,
+        expectedIncome: 0,
+        confirmedIncome: 0,
+        pendingIncome: 0,
+        pendingReservations: 0,
+        confirmedReservations: 0,
+        cancelledReservations: 0,
+      };
+      return this.mapEventResponse(event, {
+        ...stats,
+        availableCount: Math.max(event.capacityMax - stats.reservedCount, 0),
+      });
+    });
+  }
+
+  private mapEventResponse(
+    event: SpecialEventWithInclude,
+    stats: {
+      reservedCount: number;
+      availableCount: number;
+      expectedIncome: number;
+      confirmedIncome: number;
+      pendingIncome: number;
+      pendingReservations: number;
+      confirmedReservations: number;
+      cancelledReservations: number;
+    },
+  ) {
     return {
       id: event.id,
       name: event.name,

@@ -56,8 +56,11 @@ export class CsrfGuard implements CanActivate {
       return true;
     }
 
-    const csrfCookieName = this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
-    const csrfCookie = (req.cookies?.[csrfCookieName] as string | undefined)?.trim();
+    const csrfCookieName =
+      this.configService.getOrThrow<string>('CSRF_COOKIE_NAME');
+    const csrfCookie = (
+      req.cookies?.[csrfCookieName] as string | undefined
+    )?.trim();
 
     if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
       throw new ForbiddenException('CSRF validation failed');

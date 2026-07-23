@@ -1,4 +1,7 @@
-import { calculateReviewAverage, REVIEW_RATING_FIELDS } from './reviews.service';
+import {
+  calculateReviewAverage,
+  REVIEW_RATING_FIELDS,
+} from './reviews.service';
 import type { ReviewRatingField } from './reviews.service';
 
 function makeRatings(value: number) {

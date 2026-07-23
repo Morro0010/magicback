@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateUserPasswordDto } from './dto/update-user-password.dto';
 
@@ -30,28 +31,48 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    return this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
   }
 
   async findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
-  async findAllVisible(): Promise<VisibleUser[]> {
-    const users = await this.prisma.user.findMany({
-      orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+  async findAllVisible(query: ListUsersQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
+    const where: Prisma.UserWhereInput = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {};
 
-    return users;
+    const [total, users] = await this.prisma.$transaction([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+
+    return { page, limit, total, items: users };
   }
 
   async createUser(
