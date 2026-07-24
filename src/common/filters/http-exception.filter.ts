@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
+import { sanitizeRequestUrl } from '../utils/request-url.util';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -16,6 +17,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<FastifyReply>();
     const request = ctx.getRequest<FastifyRequest>();
+    const safePath = sanitizeRequestUrl(request.url);
 
     const isHttpException = exception instanceof HttpException;
     const status = isHttpException
@@ -31,7 +33,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(
-        `${request.method} ${request.url} failed with ${status}`,
+        `${request.method} ${safePath} failed with ${status}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     }
@@ -39,7 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).send({
       statusCode: status,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: safePath,
       ...body,
     });
   }

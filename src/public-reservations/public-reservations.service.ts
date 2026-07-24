@@ -23,14 +23,12 @@ import {
   toIsoDate,
   validateTimeRange,
 } from '../common/utils/date.util';
-import {
-  hashOpaqueToken,
-  maskTokenForLogs,
-} from '../common/utils/security.util';
+import { hashOpaqueToken } from '../common/utils/security.util';
 import {
   formatPrivateEventFolio,
   nextPrivateEventFolioNumber,
 } from '../common/utils/public-folio.util';
+import { calculatePublicTokenExpiresAt } from '../common/utils/public-token.util';
 import { PublicAvailabilityQueryDto } from './dto/public-availability-query.dto';
 import { UpdatePublicReservationDto } from './dto/update-public-reservation.dto';
 import { EventType } from '../reservations/dto/event-form.dto';
@@ -47,6 +45,7 @@ import {
   PRIVATE_EVENT_SCHEDULE_OPTIONS,
   type EventFormPayload,
 } from '../reservations/event-form.constants';
+import { isPublicReservationModificationAllowed } from '../reservations/reservation-status.util';
 
 const PUBLIC_RESERVATION_INCLUDE = {
   package: true,
@@ -75,7 +74,6 @@ export class PublicReservationsService {
         ipAddress: metadata.ipAddress,
         userAgent: metadata.userAgent,
         metadata: {
-          tokenHint: maskTokenForLogs(token),
           reason: 'not_found',
         },
       });
@@ -98,7 +96,6 @@ export class PublicReservationsService {
         ipAddress: metadata.ipAddress,
         userAgent: metadata.userAgent,
         metadata: {
-          tokenHint: maskTokenForLogs(token),
           reason: 'not_found',
         },
       });
@@ -175,16 +172,15 @@ export class PublicReservationsService {
         ipAddress: metadata.ipAddress,
         userAgent: metadata.userAgent,
         metadata: {
-          tokenHint: maskTokenForLogs(token),
           reason: 'not_found',
         },
       });
       throw new NotFoundException('Reservation link not found');
     }
 
-    if (current.status === ReservationStatus.CANCELLED) {
+    if (!isPublicReservationModificationAllowed(current.status)) {
       throw new ForbiddenException(
-        'Una reservación cancelada no puede modificarse desde el enlace público.',
+        'Esta reservación ya no admite modificaciones. Solo las reservaciones en solicitud o con pago pendiente pueden cambiarse.',
       );
     }
 
@@ -330,6 +326,9 @@ export class PublicReservationsService {
         editableUntil: dateChanged
           ? calculateEditableUntil(targetDate)
           : current.editableUntil,
+        publicTokenExpiresAt: dateChanged
+          ? calculatePublicTokenExpiresAt(targetDate)
+          : undefined,
       },
       include: PUBLIC_RESERVATION_INCLUDE,
     });
@@ -376,7 +375,6 @@ export class PublicReservationsService {
       userAgent: metadata.userAgent,
       metadata: {
         reservationId: updated.id,
-        tokenHint: maskTokenForLogs(token),
       },
     });
 
@@ -390,9 +388,14 @@ export class PublicReservationsService {
   }
 
   private async findByToken(token: string) {
-    return this.prisma.reservation.findUnique({
+    if (typeof token !== 'string' || token.length < 32 || token.length > 128) {
+      return null;
+    }
+
+    return this.prisma.reservation.findFirst({
       where: {
         publicTokenHash: hashOpaqueToken(token),
+        publicTokenExpiresAt: { gt: new Date() },
       },
       include: PUBLIC_RESERVATION_INCLUDE,
     });
@@ -404,7 +407,7 @@ export class PublicReservationsService {
     }>,
   ) {
     const editable =
-      reservation.status !== ReservationStatus.CANCELLED &&
+      isPublicReservationModificationAllowed(reservation.status) &&
       !isPublicReservationEditionLocked(reservation.eventDate);
     const eventForm = this.parseEventForm(reservation.eventFormJson);
     const publicEventForm = {
@@ -442,7 +445,9 @@ export class PublicReservationsService {
         ? null
         : reservation.status === ReservationStatus.CANCELLED
           ? 'Esta reservación está cancelada y no admite modificaciones en línea. Si necesitas ayuda, comunícate directamente con administración de Magic City.'
-          : 'Tu evento está próximo y las modificaciones en línea ya están cerradas. Para solicitar algún cambio, comunícate directamente con administración de Magic City. Este cierre nos ayuda a preparar correctamente todos los detalles de tu evento.',
+          : !isPublicReservationModificationAllowed(reservation.status)
+            ? 'Esta reservación ya está cerrada para modificaciones. Solo las reservaciones en solicitud o con pago pendiente pueden editarse.'
+            : 'Tu evento está próximo y las modificaciones en línea ya están cerradas. Para solicitar algún cambio, comunícate directamente con administración de Magic City. Este cierre nos ayuda a preparar correctamente todos los detalles de tu evento.',
       updatedAt: reservation.updatedAt,
     };
   }

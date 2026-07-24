@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
@@ -30,16 +31,51 @@ import { SalesModule } from './sales/sales.module';
 import { SpecialEventsModule } from './special-events/special-events.module';
 import { UsersModule } from './users/users.module';
 
+function isLoginRequest(context: ExecutionContext) {
+  return (
+    context.getClass().name === 'AuthController' &&
+    context.getHandler().name === 'login'
+  );
+}
+
 @Module({
   imports: [
     ConfigModule,
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        limit: 200,
-        ttl: 900_000,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: 'default',
+          limit: 200,
+          ttl: 900_000,
+        },
+        {
+          name: 'login-ip',
+          limit: 10,
+          ttl: 900_000,
+          blockDuration: 900_000,
+          skipIf: (context) => !isLoginRequest(context),
+        },
+        {
+          name: 'login-account',
+          limit: 12,
+          ttl: 1_800_000,
+          blockDuration: 1_800_000,
+          skipIf: (context) => !isLoginRequest(context),
+          getTracker: (request) => {
+            const body = (request as { body?: unknown }).body;
+            const rawEmail =
+              body && typeof body === 'object'
+                ? (body as { email?: unknown }).email
+                : undefined;
+            const email =
+              typeof rawEmail === 'string'
+                ? rawEmail.trim().toLowerCase()
+                : '<invalid-email>';
+            return `account:${email}`;
+          },
+        },
+      ],
+    }),
     PrismaModule,
     CommonModule,
     HealthModule,

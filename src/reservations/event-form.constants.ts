@@ -223,6 +223,12 @@ export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
         mapLegacyCakeFlavor(input?.cakeOption) ||
         null
       : null;
+  const foodOption =
+    eventType === EventType.BIRTHDAY_PARTY
+      ? (input?.selectedOptions?.foodOption ??
+        inferFoodOption(input?.pizzaFlavor) ??
+        null)
+      : null;
   const packageType =
     eventType === EventType.BIRTHDAY_PARTY
       ? (input?.packageType ?? null)
@@ -256,12 +262,7 @@ export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
       },
       selectedOptions: {
         freshWaterFlavor,
-        foodOption:
-          eventType === EventType.BIRTHDAY_PARTY
-            ? (input?.selectedOptions?.foodOption ??
-              inferFoodOption(input?.pizzaFlavor) ??
-              null)
-            : null,
+        foodOption,
         cakeProvider:
           eventType === EventType.BIRTHDAY_PARTY
             ? (input?.selectedOptions?.cakeProvider ??
@@ -337,11 +338,13 @@ export function normalizeEventForm(input?: EventFormInput): EventFormPayload {
       childrenCount: guestChildren,
       adultsCount: guestAdults,
       pizzaFlavor:
-        eventType === EventType.BIRTHDAY_PARTY
+        eventType === EventType.BIRTHDAY_PARTY &&
+        foodOption === EventFoodOption.PIZZA
           ? input?.pizzaFlavor?.trim() || null
           : null,
       pizzaSpecial:
-        eventType === EventType.BIRTHDAY_PARTY
+        eventType === EventType.BIRTHDAY_PARTY &&
+        foodOption === EventFoodOption.PIZZA
           ? Boolean(input?.pizzaSpecial)
           : false,
       drinkOption: freshWaterFlavor,
@@ -474,6 +477,14 @@ export function getEventFormValidationMessage(
     return 'Indica la fecha de nacimiento del festejado.';
   }
 
+  if (
+    form.eventType === EventType.BIRTHDAY_PARTY &&
+    form.selectedOptions.foodOption === EventFoodOption.PIZZA &&
+    !form.pizzaFlavor
+  ) {
+    return 'Indica el sabor o los ingredientes de la pizza.';
+  }
+
   return null;
 }
 
@@ -582,6 +593,65 @@ function calculateMagicEventPricing(
         manualPrice === null,
       );
     }
+
+    if (form.pizzaSpecial) {
+      pushRow(
+        'pizza_special',
+        'Pizza de más de un ingrediente',
+        1,
+        EVENT_FORM_PRICE_CATALOG.pizzaSpecialExtra,
+      );
+    }
+
+    pushRow(
+      'extra_popcorn',
+      'Palomitas individuales',
+      form.popcornUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.popcorn,
+    );
+    pushRow(
+      'extra_candy_bag',
+      'Bolo de dulce',
+      form.candyBagUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.candyBag,
+    );
+    pushRow(
+      'extra_centerpieces',
+      'Centros de mesa',
+      form.tableCenterpiecesUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.tableCenterpieces,
+    );
+    pushRow(
+      'extra_botana_tray',
+      'Charola con botana',
+      form.botanaTrayUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.botanaTray,
+    );
+    pushRow(
+      'extra_fruit_tray',
+      'Fruta de temporada + nachos/churros',
+      form.fruitTrayUnits,
+      0,
+      true,
+    );
+    pushRow(
+      'extra_gelatin_individual',
+      'Gelatina mosaico individual',
+      form.gelatinIndividualUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.gelatinIndividual,
+    );
+    pushRow(
+      'extra_gelatin_complete',
+      'Gelatina mosaico completa',
+      form.gelatinCompleteUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.gelatinComplete,
+    );
+    pushRow(
+      'extra_cupcakes',
+      'Cupcakes',
+      form.cupcakesUnits,
+      EVENT_FORM_PRICE_CATALOG.extras.cupcakes,
+    );
   }
 
   const estimatedTotal = rows.reduce((sum, row) => sum + row.subtotal, 0);

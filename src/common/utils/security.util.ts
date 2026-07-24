@@ -19,11 +19,3 @@ export function compareOpaqueToken(token: string, tokenHash: string): boolean {
 
   return timingSafeEqual(left, right);
 }
-
-export function maskTokenForLogs(token: string): string {
-  if (!token) {
-    return 'empty';
-  }
-
-  return `${token.slice(0, 6)}...${token.slice(-4)}`;
-}

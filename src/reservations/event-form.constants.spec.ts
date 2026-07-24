@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import {
   EventAreaType,
+  EventFoodOption,
   EventPackageType,
   EventType,
 } from './dto/event-form.dto';
@@ -30,6 +31,54 @@ describe('event form pricing by event type', () => {
       'guest_children',
       'guest_adults',
     ]);
+  });
+
+  it('adds birthday extras and the combined-pizza charge', () => {
+    const form = normalizeEventForm({
+      eventType: EventType.BIRTHDAY_PARTY,
+      packageType: EventPackageType.BASICO,
+      guestCounts: { children: 0, adults: 0 },
+      selectedOptions: { foodOption: EventFoodOption.PIZZA },
+      pizzaFlavor: 'Pepperoni y champiñones',
+      pizzaSpecial: true,
+      popcornUnits: 2,
+      botanaTrayUnits: 1,
+    });
+
+    const pricing = calculateEventFormPricing(form);
+
+    expect(pricing.estimatedTotal).toBe(390);
+    expect(pricing.lineItems.map((item) => item.code)).toEqual([
+      'pizza_special',
+      'extra_popcorn',
+      'extra_botana_tray',
+    ]);
+  });
+
+  it('discards pizza-only fields when another food is selected', () => {
+    const form = normalizeEventForm({
+      eventType: EventType.BIRTHDAY_PARTY,
+      packageType: EventPackageType.BASICO,
+      selectedOptions: { foodOption: EventFoodOption.POZOLE },
+      pizzaFlavor: 'Pepperoni',
+      pizzaSpecial: true,
+    });
+
+    expect(form.pizzaFlavor).toBeNull();
+    expect(form.pizzaSpecial).toBe(false);
+  });
+
+  it('requires pizza flavor when pizza is selected', () => {
+    const form = normalizeEventForm({
+      eventType: EventType.BIRTHDAY_PARTY,
+      packageType: EventPackageType.BASICO,
+      celebrantBirthDate: '2020-05-10',
+      selectedOptions: { foodOption: EventFoodOption.PIZZA },
+    });
+
+    expect(getEventFormValidationMessage(form)).toBe(
+      'Indica el sabor o los ingredientes de la pizza.',
+    );
   });
 
   it('prices space rental by selected area only', () => {

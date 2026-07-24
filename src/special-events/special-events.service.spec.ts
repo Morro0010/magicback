@@ -187,7 +187,7 @@ describe('SpecialEventsService', () => {
       holderPhone: reservation.holderPhone,
       holderEmail: reservation.holderEmail,
     });
-    expect(result.publicLink).toContain('/special-reservation/');
+    expect(result.publicLink).toContain('/special-reservation#token=');
   });
 
   it('rejects reservations that exceed remaining capacity', async () => {

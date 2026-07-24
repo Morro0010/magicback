@@ -10,6 +10,11 @@ import {
 } from '../common/utils/security.util';
 import { AuditService } from '../common/services/audit.service';
 
+// Verifying a fixed Argon2 hash for unknown accounts keeps the login path
+// intentionally similar and avoids disclosing valid emails through timing.
+const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$R+KXb/7lJdmryVnD2VqazA$ahOjtR+xsVu2siBqgk6Svb601TMHAUMNYjwsa9Q75ZI';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -36,26 +41,14 @@ export class AuthService {
   }> {
     const normalizedEmail = input.email.toLowerCase().trim();
     const user = await this.usersService.findByEmail(normalizedEmail);
-
-    if (!user || !user.isActive) {
+    const isPasswordValid = await argon2.verify(
+      user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+      input.password,
+    );
+    if (!user || !user.isActive || !isPasswordValid) {
       await this.auditService.log({
         eventType: 'AUTH_LOGIN_FAILED',
         actorUserId: user?.id ?? null,
-        ipAddress: metadata.ipAddress,
-        userAgent: metadata.userAgent,
-        metadata: { reason: 'invalid_credentials' },
-      });
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const isPasswordValid = await argon2.verify(
-      user.passwordHash,
-      input.password,
-    );
-    if (!isPasswordValid) {
-      await this.auditService.log({
-        eventType: 'AUTH_LOGIN_FAILED',
-        actorUserId: user.id,
         ipAddress: metadata.ipAddress,
         userAgent: metadata.userAgent,
         metadata: { reason: 'invalid_credentials' },

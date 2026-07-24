@@ -108,6 +108,45 @@ describe('AuthService', () => {
     expect(result.user.email).toEqual('admin@magiccity.local');
   });
 
+  it('allows the same user to keep multiple independent active sessions', async () => {
+    const passwordHash = await argon2.hash('Admin123!');
+    findByEmailMock.mockResolvedValue({
+      id: 'u1',
+      email: 'admin@magiccity.local',
+      name: 'Admin',
+      role: UserRole.ADMIN,
+      isActive: true,
+      passwordHash,
+    });
+
+    await service.login(
+      {
+        email: 'admin@magiccity.local',
+        password: 'Admin123!',
+      },
+      { ipAddress: '10.0.0.10', userAgent: 'Equipo 1' },
+    );
+    await service.login(
+      {
+        email: 'admin@magiccity.local',
+        password: 'Admin123!',
+      },
+      { ipAddress: '10.0.0.11', userAgent: 'Equipo 2' },
+    );
+
+    expect(sessionCreateMock).toHaveBeenCalledTimes(2);
+    expect(sessionUpdateManyCalls).toHaveLength(2);
+    for (const call of sessionUpdateManyCalls) {
+      expect(call.where).toEqual(
+        expect.objectContaining({
+          userId: 'u1',
+          isActive: true,
+          OR: expect.any(Array),
+        }),
+      );
+    }
+  });
+
   it('throws unauthorized for invalid password', async () => {
     const passwordHash = await argon2.hash('Admin123!');
     findByEmailMock.mockResolvedValue({

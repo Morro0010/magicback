@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
 import { AuthenticatedRequest } from '../types/authenticated-request.type';
+import { sanitizeRequestUrl } from '../utils/request-url.util';
 
 @Injectable()
 export class RequestLoggingInterceptor implements NestInterceptor {
@@ -21,7 +22,9 @@ export class RequestLoggingInterceptor implements NestInterceptor {
         const duration = Date.now() - startedAt;
         const userSuffix = req.user ? ` user=${req.user.id}` : '';
 
-        this.logger.log(`${req.method} ${req.url} ${duration}ms${userSuffix}`);
+        this.logger.log(
+          `${req.method} ${sanitizeRequestUrl(req.url)} ${duration}ms${userSuffix}`,
+        );
       }),
     );
   }

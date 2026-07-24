@@ -28,6 +28,7 @@ import {
   formatSpecialEventTicketPrefix,
   parsePublicFolioNumber,
 } from '../common/utils/public-folio.util';
+import { calculatePublicTokenExpiresAt } from '../common/utils/public-token.util';
 import { CustomersService } from '../customers/customers.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -258,6 +259,17 @@ export class SpecialEventsService {
         });
       }
 
+      if (toIsoDate(event.eventDate) !== toIsoDate(current.eventDate)) {
+        await tx.specialEventReservation.updateMany({
+          where: { specialEventId: event.id },
+          data: {
+            publicTokenExpiresAt: calculatePublicTokenExpiresAt(
+              event.eventDate,
+            ),
+          },
+        });
+      }
+
       return event;
     });
 
@@ -446,6 +458,7 @@ export class SpecialEventsService {
         data: {
           specialEventId: event.id,
           publicTokenHash: hashOpaqueToken(publicToken),
+          publicTokenExpiresAt: calculatePublicTokenExpiresAt(event.eventDate),
           holderName: dto.holderName.trim(),
           holderPhone: dto.holderPhone.trim(),
           holderEmail: dto.holderEmail?.trim() || null,
@@ -619,6 +632,9 @@ export class SpecialEventsService {
       where: { id },
       data: {
         publicTokenHash: hashOpaqueToken(token),
+        publicTokenExpiresAt: calculatePublicTokenExpiresAt(
+          reservation.specialEvent.eventDate,
+        ),
       },
       include: SPECIAL_RESERVATION_INCLUDE,
     });
@@ -1011,8 +1027,15 @@ export class SpecialEventsService {
   }
 
   private async findReservationByTokenOrThrow(token: string) {
-    const reservation = await this.prisma.specialEventReservation.findUnique({
-      where: { publicTokenHash: hashOpaqueToken(token) },
+    if (typeof token !== 'string' || token.length < 32 || token.length > 128) {
+      throw new NotFoundException('Link de reserva especial no encontrado');
+    }
+
+    const reservation = await this.prisma.specialEventReservation.findFirst({
+      where: {
+        publicTokenHash: hashOpaqueToken(token),
+        publicTokenExpiresAt: { gt: new Date() },
+      },
       include: SPECIAL_RESERVATION_INCLUDE,
     });
     if (!reservation) {
@@ -1053,7 +1076,7 @@ export class SpecialEventsService {
           origin.startsWith('http://') || origin.startsWith('https://'),
       );
 
-    return `${frontendOrigin ?? 'http://localhost:5173'}/special-reservation/${token}`;
+    return `${frontendOrigin ?? 'http://localhost:5173'}/special-reservation#token=${encodeURIComponent(token)}`;
   }
 
   private waMeLink(phone: string, text: string) {

@@ -25,13 +25,13 @@ import { calculateEditableUntil, toIsoDate } from '../common/utils/date.util';
 import {
   generateOpaqueToken,
   hashOpaqueToken,
-  maskTokenForLogs,
 } from '../common/utils/security.util';
 import {
   formatPrivateEventFolio,
   nextPrivateEventFolioNumber,
   parsePublicFolioNumber,
 } from '../common/utils/public-folio.util';
+import { calculatePublicTokenExpiresAt } from '../common/utils/public-token.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { HistoryService } from '../history/history.service';
@@ -274,6 +274,7 @@ export class ReservationsService {
     const reservation = await this.prisma.reservation.create({
       data: {
         publicTokenHash,
+        publicTokenExpiresAt: calculatePublicTokenExpiresAt(eventDate),
         privateEventFolioNumber,
         celebrantName: dto.celebrantName.trim(),
         eventFormJson: normalizedEventForm,
@@ -337,7 +338,6 @@ export class ReservationsService {
         reservationId: reservation.id,
         eventDate: toIsoDate(reservation.eventDate),
         startTime: reservation.startTime,
-        tokenHint: maskTokenForLogs(publicToken),
       },
     });
 
@@ -365,10 +365,6 @@ export class ReservationsService {
 
     if (!current) {
       throw new NotFoundException('Reservation not found');
-    }
-
-    if (current.status === ReservationStatus.CANCELLED) {
-      throw new BadRequestException('Cancelled reservations cannot be edited');
     }
 
     const targetDate = dto.eventDate
@@ -492,6 +488,9 @@ export class ReservationsService {
           ? parseEventDate(dto.paymentDate)
           : undefined,
         editableUntil,
+        publicTokenExpiresAt: dateChanged
+          ? calculatePublicTokenExpiresAt(targetDate)
+          : undefined,
         updatedByUserId: actor.id,
       },
       include: RESERVATION_INCLUDE,
@@ -622,12 +621,6 @@ export class ReservationsService {
       throw new NotFoundException('Reservation not found');
     }
 
-    if (current.status === ReservationStatus.CANCELLED) {
-      throw new BadRequestException(
-        'Cancelled reservations cannot be reassigned',
-      );
-    }
-
     const currentEventForm = this.parseEventForm(current.eventFormJson);
     this.assertEventBusinessRules(currentEventForm, dto.startTime, dto.endTime);
 
@@ -709,12 +702,6 @@ export class ReservationsService {
 
     if (!current) {
       throw new NotFoundException('Reservation not found');
-    }
-
-    if (current.status === ReservationStatus.CANCELLED) {
-      throw new BadRequestException(
-        'Cancelled reservations cannot receive payments',
-      );
     }
 
     const nextAdvanceAmount = this.toNumber(current.advanceAmount) + dto.amount;
@@ -852,6 +839,9 @@ export class ReservationsService {
       where: { id: reservationId },
       data: {
         publicTokenHash: hashOpaqueToken(nextToken),
+        publicTokenExpiresAt: calculatePublicTokenExpiresAt(
+          reservation.eventDate,
+        ),
         updatedByUserId: actor.id,
       },
     });
@@ -872,7 +862,6 @@ export class ReservationsService {
       userAgent: actor.userAgent,
       metadata: {
         reservationId,
-        tokenHint: maskTokenForLogs(nextToken),
       },
     });
 
@@ -1172,7 +1161,7 @@ export class ReservationsService {
 
   private buildPublicReservationUrl(token: string): string {
     const frontendOrigin = this.getPrimaryFrontendOrigin();
-    return `${frontendOrigin}/public/reservations/${token}`;
+    return `${frontendOrigin}/public/reservations#token=${encodeURIComponent(token)}`;
   }
 
   private getPrimaryFrontendOrigin(): string {

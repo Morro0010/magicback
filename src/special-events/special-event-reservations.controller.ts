@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PublicRoute } from '../common/decorators/public-route.decorator';
@@ -11,6 +20,15 @@ import { SpecialEventsService } from './special-events.service';
 export class SpecialEventReservationsController {
   constructor(private readonly specialEventsService: SpecialEventsService) {}
 
+  @Get('public')
+  @PublicRoute()
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
+  getPublicReservationByHeader(
+    @Headers('x-public-reservation-token') token: string,
+  ) {
+    return this.specialEventsService.getPublicReservationByToken(token);
+  }
+
   @Get('public/:token')
   @PublicRoute()
   getPublicReservation(@Param('token') token: string) {
@@ -21,6 +39,18 @@ export class SpecialEventReservationsController {
   @PublicRoute()
   updatePublicReservation(
     @Param('token') token: string,
+    @Body() dto: CreateSpecialEventReservationDto,
+  ) {
+    return this.specialEventsService.updatePublicReservationByToken(token, dto);
+  }
+
+  @Patch('public')
+  @PublicRoute()
+  @Throttle({
+    default: { limit: 10, ttl: 60_000, blockDuration: 300_000 },
+  })
+  updatePublicReservationByHeader(
+    @Headers('x-public-reservation-token') token: string,
     @Body() dto: CreateSpecialEventReservationDto,
   ) {
     return this.specialEventsService.updatePublicReservationByToken(token, dto);

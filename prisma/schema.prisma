@@ -241,6 +241,7 @@ model Reservation {
   @@index([eventDate, startTime, endTime])
   @@index([status])
   @@index([editableUntil])
+  @@index([publicTokenExpiresAt])
   @@index([customerId])
   @@index([primaryCelebrantId])
 }
@@ -410,6 +411,7 @@ model SpecialEventReservation {
   customerId               String?
   folioNumber              Int                           @unique @default(autoincrement())
   publicTokenHash          String                        @unique
+  publicTokenExpiresAt     DateTime?
   holderName               String
   holderPhone              String
   holderEmail              String?
@@ -432,6 +434,7 @@ model SpecialEventReservation {
   updatedAt                DateTime                      @updatedAt
 
   @@index([specialEventId, status])
+  @@index([publicTokenExpiresAt])
   @@index([customerId])
   @@index([folioNumber])
   @@index([holderName])

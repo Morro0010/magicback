@@ -8,10 +8,12 @@ import { normalizeEventForm } from '../reservations/event-form.constants';
 import { EventAreaType, EventType } from '../reservations/dto/event-form.dto';
 import { PublicReservationsService } from './public-reservations.service';
 
+const OPAQUE_TOKEN = 'a'.repeat(43);
+
 describe('PublicReservationsService', () => {
   const prisma = {
     reservation: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
     },
     package: { findUnique: jest.fn() },
@@ -64,7 +66,7 @@ describe('PublicReservationsService', () => {
       theme: null,
       foodDetails: null,
       notes: null,
-      status: ReservationStatus.CONFIRMED,
+      status: ReservationStatus.REQUESTED,
       advanceAmount: { toString: () => '500' },
       pendingBalance: { toString: () => '5000' },
       paymentDate: new Date('2026-07-01T00:00:00.000Z'),
@@ -77,11 +79,12 @@ describe('PublicReservationsService', () => {
   }
 
   it('blocks edition when event is 3 days or less away', async () => {
-    prisma.reservation.findUnique.mockResolvedValue({
+    const eventDate = addCalendarDays(getBusinessCalendarDate(), 3);
+    prisma.reservation.findFirst.mockResolvedValue({
       id: 'r1',
       publicTokenHash: 'hash',
       celebrantName: 'Test',
-      eventDate: new Date(),
+      eventDate: new Date(`${eventDate}T00:00:00.000Z`),
       startTime: '12:00',
       endTime: '14:00',
       attendeesCount: 20,
@@ -90,7 +93,7 @@ describe('PublicReservationsService', () => {
       theme: null,
       foodDetails: null,
       notes: null,
-      status: 'CONFIRMED',
+      status: ReservationStatus.REQUESTED,
       advanceAmount: 500,
       pendingBalance: 500,
       paymentDate: null,
@@ -103,7 +106,7 @@ describe('PublicReservationsService', () => {
 
     await expect(
       service.updatePublicReservationByToken(
-        'opaque-token',
+        OPAQUE_TOKEN,
         {
           theme: 'Nuevo tema',
         },
@@ -112,13 +115,59 @@ describe('PublicReservationsService', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('blocks public changes after a reservation is confirmed', async () => {
+    prisma.reservation.findFirst.mockResolvedValue({
+      ...makeEditableReservation(),
+      status: ReservationStatus.CONFIRMED,
+    });
+
+    await expect(
+      service.updatePublicReservationByToken(
+        OPAQUE_TOKEN,
+        { theme: 'Nuevo tema' },
+        { ipAddress: '127.0.0.1' },
+      ),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.reservation.update).not.toHaveBeenCalled();
+  });
+
+  it('returns a confirmed reservation in read-only mode', async () => {
+    prisma.reservation.findFirst.mockResolvedValue({
+      ...makeEditableReservation(),
+      status: ReservationStatus.CONFIRMED,
+    });
+
+    const result = await service.getPublicReservationByToken(OPAQUE_TOKEN, {
+      ipAddress: '127.0.0.1',
+    });
+
+    expect(result.isEditable).toBe(false);
+    expect(result.editionMessage).toContain('cerrada para modificaciones');
+  });
+
+  it('returns a reservation three days away in read-only mode', async () => {
+    const eventDate = addCalendarDays(getBusinessCalendarDate(), 3);
+    prisma.reservation.findFirst.mockResolvedValue({
+      ...makeEditableReservation(),
+      eventDate: new Date(`${eventDate}T00:00:00.000Z`),
+      status: ReservationStatus.REQUESTED,
+    });
+
+    const result = await service.getPublicReservationByToken(OPAQUE_TOKEN, {
+      ipAddress: '127.0.0.1',
+    });
+
+    expect(result.isEditable).toBe(false);
+    expect(result.editionMessage).toContain('evento está próximo');
+  });
+
   it('rejects availability dates inside the minimum lead window', async () => {
-    prisma.reservation.findUnique.mockResolvedValue(makeEditableReservation());
+    prisma.reservation.findFirst.mockResolvedValue(makeEditableReservation());
     const invalidDate = addCalendarDays(getBusinessCalendarDate(), 3);
 
     await expect(
       service.getAvailabilityByToken(
-        'opaque-token',
+        OPAQUE_TOKEN,
         { date: invalidDate },
         { ipAddress: '127.0.0.1' },
       ),
@@ -135,7 +184,7 @@ describe('PublicReservationsService', () => {
       status: ReservationStatus.REQUESTED,
       pendingBalance: { toString: () => '5000' },
     };
-    prisma.reservation.findUnique.mockResolvedValue(current);
+    prisma.reservation.findFirst.mockResolvedValue(current);
     prisma.package.findUnique.mockResolvedValue({
       id: 'p1',
       name: 'Paquete',
@@ -145,7 +194,7 @@ describe('PublicReservationsService', () => {
     prisma.reservation.update.mockResolvedValue(updated);
 
     const result = await service.updatePublicReservationByToken(
-      'opaque-token',
+      OPAQUE_TOKEN,
       { eventDate: targetDate },
       { ipAddress: '127.0.0.1' },
     );

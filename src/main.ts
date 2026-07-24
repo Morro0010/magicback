@@ -15,10 +15,6 @@ import { registerScannerBlocker } from './common/security/scanner-blocker';
 
 function normalizeOrigin(origin: string) {
   const trimmed = origin.trim();
-  if (trimmed === 'file://' || trimmed === 'null') {
-    return trimmed;
-  }
-
   return trimmed.replace(/\/+$/, '');
 }
 
@@ -27,7 +23,9 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       bodyLimit: 1_048_576,
-      trustProxy: true,
+      // Heroku adds the real client as the nearest forwarded hop. Trusting
+      // every value lets callers forge X-Forwarded-For and evade throttling.
+      trustProxy: 1,
       logger: true,
       disableRequestLogging: true,
     }),
@@ -51,14 +49,6 @@ async function bootstrap() {
     ...new Set([...frontendOrigins, ...localDevelopmentOrigins]),
   ];
   const cspConnectSources = frontendOrigins.flatMap((origin) => {
-    if (origin === 'null') {
-      return [];
-    }
-
-    if (origin === 'file://') {
-      return ['file:'];
-    }
-
     return [origin];
   });
 
@@ -102,14 +92,7 @@ async function bootstrap() {
 
       const normalizedOrigin = normalizeOrigin(origin);
 
-      if (
-        allowedOrigins.includes(normalizedOrigin) ||
-        (normalizedOrigin.startsWith('file://') &&
-          frontendOrigins.includes('file://')) ||
-        (normalizedOrigin === 'null' &&
-          (frontendOrigins.includes('file://') ||
-            frontendOrigins.includes('null')))
-      ) {
+      if (allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
         return;
       }
@@ -130,6 +113,7 @@ async function bootstrap() {
       'Content-Type',
       'X-CSRF-Token',
       'X-Magic-Desktop',
+      'X-Public-Reservation-Token',
     ],
   });
 
@@ -146,14 +130,16 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('MAGIC CITY API')
-    .setDescription('API demo funcional para manejo de eventos')
-    .setVersion('1.0.0')
-    .addCookieAuth('mc_session')
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  if (!isProduction) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('MAGIC CITY API')
+      .setDescription('API demo funcional para manejo de eventos')
+      .setVersion('1.0.0')
+      .addCookieAuth('mc_session')
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const prismaService = app.get(PrismaService);
   await prismaService.enableShutdownHooks();

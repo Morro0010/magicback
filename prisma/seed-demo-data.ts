@@ -35,6 +35,22 @@ import {
 } from '../src/reservations/dto/event-form.dto';
 
 const prisma = new PrismaClient();
+const DEFAULT_ADMIN_PASSWORD = 'Admin123!';
+const DEFAULT_CASHIER_PASSWORD = 'Cashier123!';
+const DEFAULT_INACTIVE_PASSWORD = 'Inactive123!';
+
+function getDemoPassword(name: string, localDefault: string) {
+  const configured = process.env[name];
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction && (!configured || configured === localDefault)) {
+    throw new Error(
+      `${name} must be explicitly set to a non-demo value in production`,
+    );
+  }
+
+  return configured ?? localDefault;
+}
 type SeedEventFormInput = NonNullable<Parameters<typeof normalizeEventForm>[0]>;
 
 type DemoPublicLink = {
@@ -894,7 +910,7 @@ async function createReservation(input: {
   if (input.exposePublicLink !== false) {
     demoPublicLinks.push({
       label: `Reservación ${input.celebrantName}`,
-      path: `/public/reservations/${token}`,
+      path: `/public/reservations#token=${encodeURIComponent(token)}`,
     });
   }
 
@@ -1110,7 +1126,7 @@ async function createSpecialEventReservation(input: {
             provider: 'mock',
             payloadJson: {
               seed: true,
-              trackingLink: `/special-reservation/${token}`,
+              trackingLink: `/special-reservation#token=${encodeURIComponent(token)}`,
               folio,
             },
             triggeredByUserId: input.paymentConfirmedByUserId ?? null,
@@ -1122,7 +1138,7 @@ async function createSpecialEventReservation(input: {
 
   demoPublicLinks.push({
     label: `Boletos ${folio} · ${input.holderName}`,
-    path: `/special-reservation/${token}`,
+    path: `/special-reservation#token=${encodeURIComponent(token)}`,
   });
 
   return { reservation, token, folio, customerId: customer.id };
@@ -1934,9 +1950,18 @@ async function assertDemoCoverage() {
     }),
   ]);
   const validPasswords = await Promise.all([
-    argon2.verify(admin.passwordHash, 'Admin123!'),
-    argon2.verify(cashier.passwordHash, 'Cashier123!'),
-    argon2.verify(inactiveCashier.passwordHash, 'Inactive123!'),
+    argon2.verify(
+      admin.passwordHash,
+      getDemoPassword('DEMO_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD),
+    ),
+    argon2.verify(
+      cashier.passwordHash,
+      getDemoPassword('DEMO_CASHIER_PASSWORD', DEFAULT_CASHIER_PASSWORD),
+    ),
+    argon2.verify(
+      inactiveCashier.passwordHash,
+      getDemoPassword('DEMO_INACTIVE_PASSWORD', DEFAULT_INACTIVE_PASSWORD),
+    ),
   ]);
   if (validPasswords.some((isValid) => !isValid) || inactiveCashier.isActive) {
     throw new Error(
@@ -2013,19 +2038,25 @@ async function main() {
     email: 'admin@magiccity.local',
     name: 'Sofía Administradora',
     role: UserRole.ADMIN,
-    password: 'Admin123!',
+    password: getDemoPassword('DEMO_ADMIN_PASSWORD', DEFAULT_ADMIN_PASSWORD),
   });
   const cashier = await ensureUser({
     email: 'cashier1@magiccity.local',
     name: 'Carlos Cajero',
     role: UserRole.CASHIER,
-    password: 'Cashier123!',
+    password: getDemoPassword(
+      'DEMO_CASHIER_PASSWORD',
+      DEFAULT_CASHIER_PASSWORD,
+    ),
   });
   await ensureUser({
     email: 'cashier.inactive@magiccity.local',
     name: 'Cajero Inactivo Demo',
     role: UserRole.CASHIER,
-    password: 'Inactive123!',
+    password: getDemoPassword(
+      'DEMO_INACTIVE_PASSWORD',
+      DEFAULT_INACTIVE_PASSWORD,
+    ),
     isActive: false,
   });
 
@@ -2484,9 +2515,10 @@ async function main() {
   ]);
 
   console.log('Demo data reset complete and coverage checks passed.');
-  console.log('Admin: admin@magiccity.local / Admin123!');
-  console.log('Cashier: cashier1@magiccity.local / Cashier123!');
-  console.log('Inactive user: cashier.inactive@magiccity.local / Inactive123!');
+  console.log('Admin demo: admin@magiccity.local');
+  console.log('Cashier demo: cashier1@magiccity.local');
+  console.log('Inactive demo user: cashier.inactive@magiccity.local');
+  console.log('Passwords are read from DEMO_*_PASSWORD.');
   console.log(
     [
       `Products: ${summary[0]}`,

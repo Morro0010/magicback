@@ -8,6 +8,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PublicRoute } from '../common/decorators/public-route.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -37,6 +38,9 @@ export class SpecialEventsController {
 
   @Post('public/:id/reservations')
   @PublicRoute()
+  @Throttle({
+    default: { limit: 5, ttl: 60_000, blockDuration: 600_000 },
+  })
   createPublicReservation(
     @Param() params: IdParamDto,
     @Body() dto: CreateSpecialEventReservationDto,
